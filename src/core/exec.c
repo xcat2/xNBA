@@ -95,7 +95,7 @@ int execv ( const char *command, char * const argv[] ) {
  * The expanded command line is allocated with malloc() and the caller
  * must eventually free() it.
  */
-static char * expand_command ( const char *command ) {
+char * expand_command ( const char *command ) {
 	char *expcmd;
 	char *start;
 	char *end;

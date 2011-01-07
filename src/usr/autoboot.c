@@ -33,6 +33,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <usr/dhcpmgmt.h>
 #include <usr/imgmgmt.h>
 #include <usr/autoboot.h>
+char * expand_command ( const char *command );
 
 /** @file
  *
@@ -97,7 +98,9 @@ int boot_next_server_and_filename ( struct in_addr next_server,
 		uri_encode ( filename, buf + strlen ( buf ),
 			     sizeof ( buf ) - strlen ( buf ), URI_PATH );
 		filename = buf;
-	}
+	} else { /* I don't think it could hurt the tftp case, but might as well stay out of a codepath I don't intend to rigorously test */
+                filename = expand_command(filename);
+        }
 
 	/* Download and boot image */
 	image = alloc_image();
