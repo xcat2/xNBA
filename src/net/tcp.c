@@ -1120,7 +1120,8 @@ static int tcp_rx ( struct io_buffer *iobuf,
 
 	/* If no connection was found, send RST */
 	if ( ! tcp ) {
-		tcp_xmit_reset ( tcp, st_src, tcphdr );
+		/* Transmitting RST costs precious neighbor table space, and this is no worse than most boot roms */
+		/* tcp_xmit_reset ( tcp, st_src, tcphdr ); */
 		rc = -ENOTCONN;
 		goto discard;
 	}

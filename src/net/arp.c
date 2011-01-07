@@ -234,7 +234,7 @@ static int arp_rx ( struct io_buffer *iobuf, struct net_device *netdev,
 		goto done;
 	
 	/* Create new ARP table entry if necessary */
-	if ( ! merge ) {
+	if ( ( arphdr->ar_op == htons ( ARPOP_REPLY ) ) && (! merge ) ) {
 		arp = &arp_table[next_new_arp_entry++ % NUM_ARP_ENTRIES];
 		arp->ll_protocol = ll_protocol;
 		arp->net_protocol = net_protocol;

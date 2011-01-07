@@ -69,11 +69,12 @@ static int icmp_rx ( struct io_buffer *iobuf, struct sockaddr_tcpip *st_src,
 	}
 
 	/* We respond only to pings */
-	if ( icmp->type != ICMP_ECHO_REQUEST ) {
+        /* Don't bother responding to ping, it's above what most do and the neighbor table is preciously small here */
+	/* if ( icmp->type != ICMP_ECHO_REQUEST ) { */
 		DBG ( "ICMP ignoring type %d\n", icmp->type );
 		rc = 0;
 		goto done;
-	}
+	/* } */
 
 	DBG ( "ICMP responding to ping\n" );
 
