@@ -119,6 +119,11 @@ int loopback_test ( struct net_device *sender, struct net_device *receiver,
 	ifstat ( sender );
 	ifstat ( receiver );
 
+	/* Freeze receive queue processing on the receiver, so that we
+	 * can extract all received packets.
+	 */
+	netdev_rx_freeze ( receiver );
+
 	/* Perform loopback test */
 	for ( successes = 0 ; ; successes++ ) {
 
@@ -155,8 +160,7 @@ int loopback_test ( struct net_device *sender, struct net_device *receiver,
 				goto done;
 			}
 			/* Poll network devices */
-			netdev_poll ( sender );
-			netdev_poll ( receiver );
+			net_poll();
 		} while ( ( iobuf = netdev_rx_dequeue ( receiver ) ) == NULL );
 
 		/* Check received packet */
@@ -190,7 +194,7 @@ int loopback_test ( struct net_device *sender, struct net_device *receiver,
 			}
 		} else {
 			printf ( "\nReceived spurious packet type %04x\n",
-				 net_proto );
+				 ntohs ( net_proto ) );
 			/* Continue; this allows for the fact that
 			 * there may have been packets outstanding on
 			 * the wire when we started the test.
@@ -203,6 +207,7 @@ int loopback_test ( struct net_device *sender, struct net_device *receiver,
  done:
 	printf ( "\n");
 	free_iob ( iobuf );
+	netdev_rx_unfreeze ( receiver );
 
 	/* Dump final statistics */
 	ifstat ( sender );

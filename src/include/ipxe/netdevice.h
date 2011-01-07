@@ -36,14 +36,25 @@ struct device;
 /** Maximum length of a link-layer header
  *
  * The longest currently-supported link-layer header is for 802.11: a
- * 24-byte frame header plus an 8-byte 802.3 LLC/SNAP header.  (The
- * IPoIB link-layer pseudo-header doesn't actually include link-layer
- * addresses; see ipoib.c for details).
+ * 24-byte frame header plus an 8-byte 802.3 LLC/SNAP header, plus a
+ * possible 4-byte VLAN header.  (The IPoIB link-layer pseudo-header
+ * doesn't actually include link-layer addresses; see ipoib.c for
+ * details.)
  */
-#define MAX_LL_HEADER_LEN 32
+#define MAX_LL_HEADER_LEN 36
 
 /** Maximum length of a network-layer address */
 #define MAX_NET_ADDR_LEN 4
+
+/** Maximum length of a network-layer header
+ *
+ * The longest currently-supported network-layer header is for IPv6 at
+ * 40 bytes.
+ */
+#define MAX_NET_HEADER_LEN 40
+
+/** Maximum combined length of a link-layer and network-layer header */
+#define MAX_LL_NET_HEADER_LEN ( MAX_LL_HEADER_LEN + MAX_NET_HEADER_LEN )
 
 /**
  * A network-layer protocol
@@ -268,7 +279,7 @@ struct net_device {
 	/** List of open network devices */
 	struct list_head open_list;
 	/** Name of this network device */
-	char name[8];
+	char name[12];
 	/** Underlying hardware device */
 	struct device *dev;
 
@@ -332,6 +343,9 @@ struct net_device {
 
 /** Network device interrupts are enabled */
 #define NETDEV_IRQ_ENABLED 0x0002
+
+/** Network device receive queue processing is frozen */
+#define NETDEV_RX_FROZEN 0x0004
 
 /** Link-layer protocol table */
 #define LL_PROTOCOLS __table ( struct ll_protocol, "ll_protocols" )
@@ -475,8 +489,7 @@ netdev_settings ( struct net_device *netdev ) {
  */
 static inline __attribute__ (( always_inline )) void
 netdev_settings_init ( struct net_device *netdev ) {
-	generic_settings_init ( &netdev->settings,
-				&netdev->refcnt, netdev->name );
+	generic_settings_init ( &netdev->settings, &netdev->refcnt );
 	netdev->settings.settings.op = &netdev_settings_operations;
 }
 
@@ -495,7 +508,7 @@ netdev_link_ok ( struct net_device *netdev ) {
  * Check whether or not network device is open
  *
  * @v netdev		Network device
- * @v is_open		Network device is open
+ * @ret is_open		Network device is open
  */
 static inline __attribute__ (( always_inline )) int
 netdev_is_open ( struct net_device *netdev ) {
@@ -506,11 +519,22 @@ netdev_is_open ( struct net_device *netdev ) {
  * Check whether or not network device interrupts are currently enabled
  *
  * @v netdev		Network device
- * @v irq_enabled	Network device interrupts are enabled
+ * @ret irq_enabled	Network device interrupts are enabled
  */
 static inline __attribute__ (( always_inline )) int
 netdev_irq_enabled ( struct net_device *netdev ) {
 	return ( netdev->state & NETDEV_IRQ_ENABLED );
+}
+
+/**
+ * Check whether or not network device receive queue processing is frozen
+ *
+ * @v netdev		Network device
+ * @ret rx_frozen	Network device receive queue processing is frozen
+ */
+static inline __attribute__ (( always_inline )) int
+netdev_rx_frozen ( struct net_device *netdev ) {
+	return ( netdev->state & NETDEV_RX_FROZEN );
 }
 
 extern void netdev_link_err ( struct net_device *netdev, int rc );
@@ -540,6 +564,7 @@ extern int net_tx ( struct io_buffer *iobuf, struct net_device *netdev,
 extern int net_rx ( struct io_buffer *iobuf, struct net_device *netdev,
 		    uint16_t net_proto, const void *ll_dest,
 		    const void *ll_source );
+extern void net_poll ( void );
 
 /**
  * Complete network transmission
@@ -573,6 +598,26 @@ static inline void netdev_tx_complete_next ( struct net_device *netdev ) {
 static inline __attribute__ (( always_inline )) void
 netdev_link_up ( struct net_device *netdev ) {
 	netdev_link_err ( netdev, 0 );
+}
+
+/**
+ * Freeze network device receive queue processing
+ *
+ * @v netdev		Network device
+ */
+static inline __attribute__ (( always_inline )) void
+netdev_rx_freeze ( struct net_device *netdev ) {
+	netdev->state |= NETDEV_RX_FROZEN;
+}
+
+/**
+ * Unfreeze network device receive queue processing
+ *
+ * @v netdev		Network device
+ */
+static inline __attribute__ (( always_inline )) void
+netdev_rx_unfreeze ( struct net_device *netdev ) {
+	netdev->state &= ~NETDEV_RX_FROZEN;
 }
 
 #endif /* _IPXE_NETDEVICE_H */

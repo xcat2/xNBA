@@ -79,10 +79,10 @@ void netdev_link_err ( struct net_device *netdev, int rc ) {
 	/* Record link state */
 	netdev->link_rc = rc;
 	if ( netdev->link_rc == 0 ) {
-		DBGC ( netdev, "NETDEV %p link is up\n", netdev );
+		DBGC ( netdev, "NETDEV %s link is up\n", netdev->name );
 	} else {
-		DBGC ( netdev, "NETDEV %p link is down: %s\n",
-		       netdev, strerror ( netdev->link_rc ) );
+		DBGC ( netdev, "NETDEV %s link is down: %s\n",
+		       netdev->name, strerror ( netdev->link_rc ) );
 	}
 
 	/* Notify drivers of link state change */
@@ -157,8 +157,8 @@ static void netdev_record_stat ( struct net_device_stats *stats, int rc ) {
 int netdev_tx ( struct net_device *netdev, struct io_buffer *iobuf ) {
 	int rc;
 
-	DBGC ( netdev, "NETDEV %p transmitting %p (%p+%zx)\n",
-	       netdev, iobuf, iobuf->data, iob_len ( iobuf ) );
+	DBGC ( netdev, "NETDEV %s transmitting %p (%p+%zx)\n",
+	       netdev->name, iobuf, iobuf->data, iob_len ( iobuf ) );
 
 	/* Enqueue packet */
 	list_add_tail ( &iobuf->list, &netdev->tx_queue );
@@ -202,11 +202,11 @@ void netdev_tx_complete_err ( struct net_device *netdev,
 	/* Update statistics counter */
 	netdev_record_stat ( &netdev->tx_stats, rc );
 	if ( rc == 0 ) {
-		DBGC ( netdev, "NETDEV %p transmission %p complete\n",
-		       netdev, iobuf );
+		DBGC ( netdev, "NETDEV %s transmission %p complete\n",
+		       netdev->name, iobuf );
 	} else {
-		DBGC ( netdev, "NETDEV %p transmission %p failed: %s\n",
-		       netdev, iobuf, strerror ( rc ) );
+		DBGC ( netdev, "NETDEV %s transmission %p failed: %s\n",
+		       netdev->name, iobuf, strerror ( rc ) );
 	}
 
 	/* Catch data corruption as early as possible */
@@ -259,8 +259,8 @@ static void netdev_tx_flush ( struct net_device *netdev ) {
  */
 void netdev_rx ( struct net_device *netdev, struct io_buffer *iobuf ) {
 
-	DBGC ( netdev, "NETDEV %p received %p (%p+%zx)\n",
-	       netdev, iobuf, iobuf->data, iob_len ( iobuf ) );
+	DBGC ( netdev, "NETDEV %s received %p (%p+%zx)\n",
+	       netdev->name, iobuf, iobuf->data, iob_len ( iobuf ) );
 
 	/* Discard packet (for test purposes) if applicable */
 	if ( ( NETDEV_DISCARD_RATE > 0 ) &&
@@ -291,8 +291,8 @@ void netdev_rx ( struct net_device *netdev, struct io_buffer *iobuf ) {
 void netdev_rx_err ( struct net_device *netdev,
 		     struct io_buffer *iobuf, int rc ) {
 
-	DBGC ( netdev, "NETDEV %p failed to receive %p: %s\n",
-	       netdev, iobuf, strerror ( rc ) );
+	DBGC ( netdev, "NETDEV %s failed to receive %p: %s\n",
+	       netdev->name, iobuf, strerror ( rc ) );
 
 	/* Discard packet */
 	free_iob ( iobuf );
@@ -405,8 +405,10 @@ int register_netdev ( struct net_device *netdev ) {
 	int rc;
 
 	/* Create device name */
-	snprintf ( netdev->name, sizeof ( netdev->name ), "net%d",
-		   ifindex++ );
+	if ( netdev->name[0] == '\0' ) {
+		snprintf ( netdev->name, sizeof ( netdev->name ), "net%d",
+			   ifindex++ );
+	}
 
 	/* Set initial link-layer address */
 	netdev->ll_protocol->init_addr ( netdev->hw_addr, netdev->ll_addr );
@@ -414,23 +416,24 @@ int register_netdev ( struct net_device *netdev ) {
 	/* Add to device list */
 	netdev_get ( netdev );
 	list_add_tail ( &netdev->list, &net_devices );
-	DBGC ( netdev, "NETDEV %p registered as %s (phys %s hwaddr %s)\n",
-	       netdev, netdev->name, netdev->dev->name,
+	DBGC ( netdev, "NETDEV %s registered (phys %s hwaddr %s)\n",
+	       netdev->name, netdev->dev->name,
 	       netdev_addr ( netdev ) );
 
 	/* Register per-netdev configuration settings */
 	if ( ( rc = register_settings ( netdev_settings ( netdev ),
-					NULL ) ) != 0 ) {
-		DBGC ( netdev, "NETDEV %p could not register settings: %s\n",
-		       netdev, strerror ( rc ) );
+					NULL, netdev->name ) ) != 0 ) {
+		DBGC ( netdev, "NETDEV %s could not register settings: %s\n",
+		       netdev->name, strerror ( rc ) );
 		goto err_register_settings;
 	}
 
 	/* Probe device */
 	for_each_table_entry ( driver, NET_DRIVERS ) {
 		if ( ( rc = driver->probe ( netdev ) ) != 0 ) {
-			DBGC ( netdev, "NETDEV %p could not add %s device: "
-			       "%s\n", netdev, driver->name, strerror ( rc ) );
+			DBGC ( netdev, "NETDEV %s could not add %s device: "
+			       "%s\n", netdev->name, driver->name,
+			       strerror ( rc ) );
 			goto err_probe;
 		}
 	}
@@ -458,14 +461,14 @@ int netdev_open ( struct net_device *netdev ) {
 	if ( netdev->state & NETDEV_OPEN )
 		return 0;
 
-	DBGC ( netdev, "NETDEV %p opening\n", netdev );
+	DBGC ( netdev, "NETDEV %s opening\n", netdev->name );
+
+	/* Mark as opened */
+	netdev->state |= NETDEV_OPEN;
 
 	/* Open the device */
 	if ( ( rc = netdev->op->open ( netdev ) ) != 0 )
 		return rc;
-
-	/* Mark as opened */
-	netdev->state |= NETDEV_OPEN;
 
 	/* Add to head of open devices list */
 	list_add ( &netdev->open_list, &open_net_devices );
@@ -487,7 +490,7 @@ void netdev_close ( struct net_device *netdev ) {
 	if ( ! ( netdev->state & NETDEV_OPEN ) )
 		return;
 
-	DBGC ( netdev, "NETDEV %p closing\n", netdev );
+	DBGC ( netdev, "NETDEV %s closing\n", netdev->name );
 
 	/* Remove from open devices list */
 	list_del ( &netdev->open_list );
@@ -529,7 +532,7 @@ void unregister_netdev ( struct net_device *netdev ) {
 	/* Remove from device list */
 	list_del ( &netdev->list );
 	netdev_put ( netdev );
-	DBGC ( netdev, "NETDEV %p unregistered\n", netdev );
+	DBGC ( netdev, "NETDEV %s unregistered\n", netdev->name );
 }
 
 /** Enable or disable interrupts
@@ -661,21 +664,19 @@ int net_rx ( struct io_buffer *iobuf, struct net_device *netdev,
 						  ll_source );
 	}
 
-	DBGC ( netdev, "NETDEV %p unknown network protocol %04x\n",
-	       netdev, ntohs ( net_proto ) );
+	DBGC ( netdev, "NETDEV %s unknown network protocol %04x\n",
+	       netdev->name, ntohs ( net_proto ) );
 	free_iob ( iobuf );
 	return -ENOTSUP;
 }
 
 /**
- * Single-step the network stack
- *
- * @v process		Network stack process
+ * Poll the network stack
  *
  * This polls all interfaces for received packets, and processes
  * packets from the RX queue.
  */
-static void net_step ( struct process *process __unused ) {
+void net_poll ( void ) {
 	struct net_device *netdev;
 	struct io_buffer *iobuf;
 	struct ll_protocol *ll_protocol;
@@ -690,6 +691,15 @@ static void net_step ( struct process *process __unused ) {
 		/* Poll for new packets */
 		netdev_poll ( netdev );
 
+		/* Leave received packets on the queue if receive
+		 * queue processing is currently frozen.  This will
+		 * happen when the raw packets are to be manually
+		 * dequeued using netdev_rx_dequeue(), rather than
+		 * processed via the usual networking stack.
+		 */
+		if ( netdev_rx_frozen ( netdev ) )
+			continue;
+
 		/* Process at most one received packet.  Give priority
 		 * to getting packets out of the NIC over processing
 		 * the received packets, because we advertise a window
@@ -698,8 +708,8 @@ static void net_step ( struct process *process __unused ) {
 		 */
 		if ( ( iobuf = netdev_rx_dequeue ( netdev ) ) ) {
 
-			DBGC ( netdev, "NETDEV %p processing %p (%p+%zx)\n",
-			       netdev, iobuf, iobuf->data,
+			DBGC ( netdev, "NETDEV %s processing %p (%p+%zx)\n",
+			       netdev->name, iobuf, iobuf->data,
 			       iob_len ( iobuf ) );
 
 			/* Remove link-layer header */
@@ -720,6 +730,15 @@ static void net_step ( struct process *process __unused ) {
 			}
 		}
 	}
+}
+
+/**
+ * Single-step the network stack
+ *
+ * @v process		Network stack process
+ */
+static void net_step ( struct process *process __unused ) {
+	net_poll();
 }
 
 /** Networking stack process */

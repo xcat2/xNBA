@@ -58,8 +58,10 @@ struct net_device *pxe_netdev = NULL;
  * @v netdev		Network device, or NULL
  */
 void pxe_set_netdev ( struct net_device *netdev ) {
-	if ( pxe_netdev )
+	if ( pxe_netdev ) {
+		netdev_rx_unfreeze ( pxe_netdev );
 		netdev_put ( pxe_netdev );
+	}
 	pxe_netdev = NULL;
 	if ( netdev )
 		pxe_netdev = netdev_get ( netdev );
@@ -76,6 +78,7 @@ static int pxe_netdev_open ( void ) {
 	if ( ( rc = netdev_open ( pxe_netdev ) ) != 0 )
 		return rc;
 
+	netdev_rx_freeze ( pxe_netdev );
 	netdev_irq ( pxe_netdev, 1 );
 	return 0;
 }
@@ -85,6 +88,7 @@ static int pxe_netdev_open ( void ) {
  *
  */
 static void pxe_netdev_close ( void ) {
+	netdev_rx_unfreeze ( pxe_netdev );
 	netdev_irq ( pxe_netdev, 0 );
 	netdev_close ( pxe_netdev );
 	undi_tx_count = 0;
@@ -228,17 +232,17 @@ PXENV_EXIT_t pxenv_undi_transmit ( struct s_PXENV_UNDI_TRANSMIT
 	struct ll_protocol *ll_protocol = pxe_netdev->ll_protocol;
 	char destaddr[MAX_LL_ADDR_LEN];
 	const void *ll_dest;
-	size_t ll_hlen = ll_protocol->ll_header_len;
 	size_t len;
 	unsigned int i;
 	int rc;
 
 	DBG2 ( "PXENV_UNDI_TRANSMIT" );
 
-	/* Forcibly enable interrupts at this point, to work around
-	 * callers that never call PXENV_UNDI_OPEN before attempting
-	 * to use the UNDI API.
+	/* Forcibly enable interrupts and freeze receive queue
+	 * processing at this point, to work around callers that never
+	 * call PXENV_UNDI_OPEN before attempting to use the UNDI API.
 	 */
+	netdev_rx_freeze ( pxe_netdev );
 	netdev_irq ( pxe_netdev, 1 );
 
 	/* Identify network-layer protocol */
@@ -248,7 +252,6 @@ PXENV_EXIT_t pxenv_undi_transmit ( struct s_PXENV_UNDI_TRANSMIT
 	case P_RARP:	net_protocol = &rarp_protocol;	break;
 	case P_UNKNOWN:
 		net_protocol = NULL;
-		ll_hlen = 0;
 		break;
 	default:
 		DBG2 ( " %02x invalid protocol\n", undi_transmit->Protocol );
@@ -271,13 +274,13 @@ PXENV_EXIT_t pxenv_undi_transmit ( struct s_PXENV_UNDI_TRANSMIT
 	}
 
 	/* Allocate and fill I/O buffer */
-	iobuf = alloc_iob ( ll_hlen + len );
+	iobuf = alloc_iob ( MAX_LL_HEADER_LEN + len );
 	if ( ! iobuf ) {
 		DBG2 ( " could not allocate iobuf\n" );
 		undi_transmit->Status = PXENV_STATUS_OUT_OF_RESOURCES;
 		return PXENV_EXIT_FAILURE;
 	}
-	iob_reserve ( iobuf, ll_hlen );
+	iob_reserve ( iobuf, MAX_LL_HEADER_LEN );
 	copy_from_real ( iob_put ( iobuf, tbd.ImmedLength ), tbd.Xmit.segment,
 			 tbd.Xmit.offset, tbd.ImmedLength );
 	for ( i = 0 ; i < tbd.DataBlkCount ; i++ ) {
@@ -558,12 +561,12 @@ PXENV_EXIT_t pxenv_undi_get_nic_type ( struct s_PXENV_UNDI_GET_NIC_TYPE
 		info->Sub_Class = PCI_SUB_CLASS ( dev->desc.class );
 		info->Prog_Intf = PCI_PROG_INTF ( dev->desc.class );
 		info->BusDevFunc = dev->desc.location;
-		/* Cheat: remaining fields are probably unnecessary,
-		 * and would require adding extra code to pci.c.
+		/* Earlier versions of the PXE specification do not
+		 * have the SubVendor_ID and SubDevice_ID fields.  It
+		 * is possible that some NBPs will not provide space
+		 * for them, and so we must not fill them in.
 		 */
-		undi_get_nic_type->info.pci.SubVendor_ID = 0xffff;
-		undi_get_nic_type->info.pci.SubDevice_ID = 0xffff;
-		DBG ( " PCI %02x:%02x.%x %04x:%04x (%04x:%04x) %02x%02x%02x "
+		DBG ( " PCI %02x:%02x.%x %04x:%04x ('%04x:%04x') %02x%02x%02x "
 		      "rev %02x\n", PCI_BUS ( info->BusDevFunc ),
 		      PCI_SLOT ( info->BusDevFunc ),
 		      PCI_FUNC ( info->BusDevFunc ), info->Vendor_ID,
@@ -672,7 +675,7 @@ PXENV_EXIT_t pxenv_undi_isr ( struct s_PXENV_UNDI_ISR *undi_isr ) {
 		/* Call poll().  This should acknowledge the device
 		 * interrupt and queue up any received packet.
 		 */
-		netdev_poll ( pxe_netdev );
+		net_poll();
 
 		/* A 100% accurate determination of "OURS" vs "NOT
 		 * OURS" is difficult to achieve without invasive and
@@ -711,7 +714,7 @@ PXENV_EXIT_t pxenv_undi_isr ( struct s_PXENV_UNDI_ISR *undi_isr ) {
 		 * PXENV_UNDI_ISR_IN_PROCESS.  Force extra polls to
 		 * cope with these out-of-spec clients.
 		 */
-		netdev_poll ( pxe_netdev );
+		net_poll();
 
 		/* If we have not yet marked a TX as complete, and the
 		 * netdev TX queue is empty, report the TX completion.
@@ -782,7 +785,15 @@ PXENV_EXIT_t pxenv_undi_isr ( struct s_PXENV_UNDI_ISR *undi_isr ) {
 		undi_isr->Frame.segment = rm_ds;
 		undi_isr->Frame.offset = __from_data16 ( basemem_packet );
 		undi_isr->ProtType = prottype;
-		undi_isr->PktType = XMT_DESTADDR;
+		if ( memcmp ( ll_dest, pxe_netdev->ll_addr,
+			      ll_protocol->ll_addr_len ) == 0 ) {
+			undi_isr->PktType = P_DIRECTED;
+		} else if ( memcmp ( ll_dest, pxe_netdev->ll_broadcast,
+				     ll_protocol->ll_addr_len ) == 0 ) {
+			undi_isr->PktType = P_BROADCAST;
+		} else {
+			undi_isr->PktType = P_MULTICAST;
+		}
 		DBGC2 ( &pxenv_undi_isr, " %04x:%04x+%x(%x) %s hlen %d",
 			undi_isr->Frame.segment, undi_isr->Frame.offset,
 			undi_isr->BufferLength, undi_isr->FrameLength,

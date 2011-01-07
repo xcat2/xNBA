@@ -215,12 +215,28 @@ int boot_root_path ( const char *root_path ) {
 }
 
 /**
+ * Close all open net devices
+ *
+ * Called before a fresh boot attempt in order to free up memory.  We
+ * don't just close the device immediately after the boot fails,
+ * because there may still be TCP connections in the process of
+ * closing.
+ */
+static void close_all_netdevs ( void ) {
+	struct net_device *netdev;
+
+	for_each_netdev ( netdev ) {
+		ifclose ( netdev );
+	}
+}
+
+/**
  * Boot from a network device
  *
  * @v netdev		Network device
  * @ret rc		Return status code
  */
-static int netboot ( struct net_device *netdev ) {
+int netboot ( struct net_device *netdev ) {
 	struct setting vendor_class_id_setting
 		= { .tag = DHCP_VENDOR_CLASS_ID };
 	struct setting pxe_discovery_control_setting
@@ -231,6 +247,9 @@ static int netboot ( struct net_device *netdev ) {
 	struct in_addr next_server;
 	unsigned int pxe_discovery_control;
 	int rc;
+
+	/* Close all other network devices */
+	close_all_netdevs();
 
 	/* Open device and display device status */
 	if ( ( rc = ifopen ( netdev ) ) != 0 )
@@ -275,40 +294,24 @@ static int netboot ( struct net_device *netdev ) {
 }
 
 /**
- * Close all open net devices
- *
- * Called before a fresh boot attempt in order to free up memory.  We
- * don't just close the device immediately after the boot fails,
- * because there may still be TCP connections in the process of
- * closing.
- */
-static void close_all_netdevs ( void ) {
-	struct net_device *netdev;
-
-	for_each_netdev ( netdev ) {
-		ifclose ( netdev );
-	}
-}
-
-/**
  * Boot the system
  */
-void autoboot ( void ) {
+int autoboot ( void ) {
 	struct net_device *boot_netdev;
 	struct net_device *netdev;
+	int rc = -ENODEV;
 
 	/* If we have an identifable boot device, try that first */
-	close_all_netdevs();
 	if ( ( boot_netdev = find_boot_netdev() ) )
-		netboot ( boot_netdev );
+		rc = netboot ( boot_netdev );
 
 	/* If that fails, try booting from any of the other devices */
 	for_each_netdev ( netdev ) {
 		if ( netdev == boot_netdev )
 			continue;
-		close_all_netdevs();
-		netboot ( netdev );
+		rc = netboot ( netdev );
 	}
 
 	printf ( "No more network devices\n" );
+	return rc;
 }

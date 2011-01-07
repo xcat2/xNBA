@@ -59,6 +59,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_acpi		       ( ERRFILE_CORE | 0x00130000 )
 #define ERRFILE_null_sanboot	       ( ERRFILE_CORE | 0x00140000 )
 #define ERRFILE_edd		       ( ERRFILE_CORE | 0x00150000 )
+#define ERRFILE_parseopt	       ( ERRFILE_CORE | 0x00160000 )
 
 #define ERRFILE_eisa		     ( ERRFILE_DRIVER | 0x00000000 )
 #define ERRFILE_isa		     ( ERRFILE_DRIVER | 0x00010000 )
@@ -66,6 +67,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_mca		     ( ERRFILE_DRIVER | 0x00030000 )
 #define ERRFILE_pci		     ( ERRFILE_DRIVER | 0x00040000 )
 #define ERRFILE_linux		     ( ERRFILE_DRIVER | 0x00050000 )
+#define ERRFILE_pcivpd		     ( ERRFILE_DRIVER | 0x00060000 )
 
 #define ERRFILE_nvs		     ( ERRFILE_DRIVER | 0x00100000 )
 #define ERRFILE_spi		     ( ERRFILE_DRIVER | 0x00110000 )
@@ -133,6 +135,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_jme		     ( ERRFILE_DRIVER | 0x005b0000 )
 #define ERRFILE_virtio_net	     ( ERRFILE_DRIVER | 0x005c0000 )
 #define ERRFILE_tap		     ( ERRFILE_DRIVER | 0x005d0000 )
+#define ERRFILE_igbvf_main	     ( ERRFILE_DRIVER | 0x005e0000 )
 
 #define ERRFILE_scsi		     ( ERRFILE_DRIVER | 0x00700000 )
 #define ERRFILE_arbel		     ( ERRFILE_DRIVER | 0x00710000 )
@@ -190,6 +193,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_fcp			( ERRFILE_NET | 0x002d0000 )
 #define ERRFILE_fcoe			( ERRFILE_NET | 0x002e0000 )
 #define ERRFILE_fcns			( ERRFILE_NET | 0x002f0000 )
+#define ERRFILE_vlan			( ERRFILE_NET | 0x00300000 )
 
 #define ERRFILE_image		      ( ERRFILE_IMAGE | 0x00000000 )
 #define ERRFILE_elf		      ( ERRFILE_IMAGE | 0x00010000 )
@@ -226,6 +230,10 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_iwmgmt		      ( ERRFILE_OTHER | 0x00190000 )
 #define ERRFILE_linux_smbios	      ( ERRFILE_OTHER | 0x001a0000 )
 #define ERRFILE_lotest		      ( ERRFILE_OTHER | 0x001b0000 )
+#define ERRFILE_config_cmd	      ( ERRFILE_OTHER | 0x001c0000 )
+#define ERRFILE_ifmgmt_cmd	      ( ERRFILE_OTHER | 0x001d0000 )
+#define ERRFILE_fcmgmt_cmd	      ( ERRFILE_OTHER | 0x001e0000 )
+#define ERRFILE_gdbstub_cmd	      ( ERRFILE_OTHER | 0x001f0000 )
 
 /** @} */
 

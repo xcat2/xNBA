@@ -38,6 +38,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/ib_smc.h>
 #include <ipxe/if_ether.h>
 #include <ipxe/ethernet.h>
+#include <ipxe/fcoe.h>
+#include <ipxe/vlan.h>
 #include "hermon.h"
 
 /**
@@ -1647,6 +1649,7 @@ static int hermon_complete ( struct ib_device *ibdev,
 		len = MLX_GET ( &cqe->normal, byte_cnt );
 		assert ( len <= iob_tailroom ( iobuf ) );
 		iob_put ( iobuf, len );
+		memset ( &recv_av, 0, sizeof ( recv_av ) );
 		switch ( qp->type ) {
 		case IB_QPT_SMI:
 		case IB_QPT_GSI:
@@ -1656,7 +1659,6 @@ static int hermon_complete ( struct ib_device *ibdev,
 			iob_pull ( iobuf, sizeof ( *grh ) );
 			/* Construct address vector */
 			av = &recv_av;
-			memset ( av, 0, sizeof ( *av ) );
 			av->qpn = MLX_GET ( &cqe->normal, srq_rqpn );
 			av->lid = MLX_GET ( &cqe->normal, slid_smac47_32 );
 			av->sl = MLX_GET ( &cqe->normal, sl );
@@ -1667,7 +1669,10 @@ static int hermon_complete ( struct ib_device *ibdev,
 			av = &qp->av;
 			break;
 		case IB_QPT_ETH:
-			av = NULL;
+			/* Construct address vector */
+			av = &recv_av;
+			av->vlan_present = MLX_GET ( &cqe->normal, vlan );
+			av->vlan = MLX_GET ( &cqe->normal, vid );
 			break;
 		default:
 			assert ( 0 );
@@ -2274,9 +2279,19 @@ static void hermon_eth_complete_send ( struct ib_device *ibdev __unused,
  */
 static void hermon_eth_complete_recv ( struct ib_device *ibdev __unused,
 				       struct ib_queue_pair *qp,
-				       struct ib_address_vector *av __unused,
+				       struct ib_address_vector *av,
 				       struct io_buffer *iobuf, int rc ) {
 	struct net_device *netdev = ib_qp_get_ownerdata ( qp );
+	struct net_device *vlan;
+
+	/* Find VLAN device, if applicable */
+	if ( av->vlan_present ) {
+		if ( ( vlan = vlan_find ( netdev, av->vlan ) ) != NULL ) {
+			netdev = vlan;
+		} else if ( rc == 0 ) {
+			rc = -ENODEV;
+		}
+	}
 
 	/* Hand off to network layer */
 	if ( rc == 0 ) {
@@ -2368,8 +2383,10 @@ static int hermon_eth_open ( struct net_device *netdev ) {
 		     v_pptx, 1 );
 	MLX_FILL_1 ( &set_port.general, 1,
 		     mtu, ( ETH_FRAME_LEN + 40 /* Used by card */ ) );
-	MLX_FILL_1 ( &set_port.general, 2, pptx, 1 );
-	MLX_FILL_1 ( &set_port.general, 3, pprx, 1 );
+	MLX_FILL_1 ( &set_port.general, 2,
+		     pfctx, ( 1 << FCOE_VLAN_PRIORITY ) );
+	MLX_FILL_1 ( &set_port.general, 3,
+		     pfcrx, ( 1 << FCOE_VLAN_PRIORITY ) );
 	if ( ( rc = hermon_cmd_set_port ( hermon, 1,
 					  ( HERMON_SET_PORT_GENERAL_PARAM |
 					    ibdev->port ),

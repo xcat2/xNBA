@@ -281,9 +281,9 @@ static struct settings * autovivify_child_settings ( struct settings *parent,
 		return NULL;
 	}
 	memcpy ( new_child->name, name, sizeof ( new_child->name ) );
-	generic_settings_init ( &new_child->generic, NULL, new_child->name );
+	generic_settings_init ( &new_child->generic, NULL );
 	settings = &new_child->generic.settings;
-	register_settings ( settings, parent );
+	register_settings ( settings, parent, new_child->name );
 	return settings;
 }
 
@@ -422,15 +422,20 @@ static void reprioritise_settings ( struct settings *settings ) {
  *
  * @v settings		Settings block
  * @v parent		Parent settings block, or NULL
+ * @v name		Settings block name
  * @ret rc		Return status code
  */
-int register_settings ( struct settings *settings, struct settings *parent ) {
+int register_settings ( struct settings *settings, struct settings *parent,
+			const char *name ) {
 	struct settings *old_settings;
 
 	/* NULL parent => add to settings root */
 	assert ( settings != NULL );
 	if ( parent == NULL )
 		parent = &settings_root;
+
+	/* Apply settings block name */
+	settings->name = name;
 
 	/* Remove any existing settings with the same name */
 	if ( ( old_settings = find_child_settings ( parent, settings->name ) ))
@@ -646,19 +651,35 @@ int fetch_string_setting_copy ( struct settings *settings,
  *
  * @v settings		Settings block, or NULL to search all blocks
  * @v setting		Setting to fetch
+ * @v inp		IPv4 addresses to fill in
+ * @v count		Maximum number of IPv4 addresses
+ * @ret len		Length of setting, or negative error
+ */
+int fetch_ipv4_array_setting ( struct settings *settings,
+			       struct setting *setting,
+			       struct in_addr *inp, unsigned int count ) {
+	int len;
+
+	len = fetch_setting ( settings, setting, inp,
+			      ( sizeof ( *inp ) * count ) );
+	if ( len < 0 )
+		return len;
+	if ( ( len % sizeof ( *inp ) ) != 0 )
+		return -ERANGE;
+	return len;
+}
+
+/**
+ * Fetch value of IPv4 address setting
+ *
+ * @v settings		Settings block, or NULL to search all blocks
+ * @v setting		Setting to fetch
  * @v inp		IPv4 address to fill in
  * @ret len		Length of setting, or negative error
  */
 int fetch_ipv4_setting ( struct settings *settings, struct setting *setting,
 			 struct in_addr *inp ) {
-	int len;
-
-	len = fetch_setting ( settings, setting, inp, sizeof ( *inp ) );
-	if ( len < 0 )
-		return len;
-	if ( len < ( int ) sizeof ( *inp ) )
-		return -ERANGE;
-	return len;
+	return fetch_ipv4_array_setting ( settings, setting, inp, 1 );
 }
 
 /**

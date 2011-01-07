@@ -123,7 +123,9 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #undef	TIME_CMD		/* Time commands */
 #undef	DIGEST_CMD		/* Image crypto digest commands */
 #undef	LOTEST_CMD		/* Loopback testing commands */
-//#undef	PXE_CMD			/* PXE commands */
+#undef	VLAN_CMD		/* VLAN commands */
+#undef	PXE_CMD			/* PXE commands */
+#undef	REBOOT_CMD		/* Reboot command */
 
 /*
  * Error message tables to include

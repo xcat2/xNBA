@@ -29,6 +29,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/xfer.h>
 #include <ipxe/netdevice.h>
 #include <ipxe/ethernet.h>
+#include <ipxe/vlan.h>
 #include <ipxe/features.h>
 #include <ipxe/errortab.h>
 #include <ipxe/device.h>
@@ -103,6 +104,10 @@ enum fcoe_flags {
 	FCOE_HAVE_FIP_FCF = 0x0004,
 	/** FCoE forwarder supports server-provided MAC addresses */
 	FCOE_FCF_ALLOWS_SPMA = 0x0008,
+	/** An alternative VLAN has been found */
+	FCOE_VLAN_FOUND = 0x0010,
+	/** VLAN discovery has timed out */
+	FCOE_VLAN_TIMED_OUT = 0x0020,
 };
 
 struct net_protocol fcoe_protocol __net_protocol;
@@ -123,6 +128,15 @@ static uint8_t all_fcf_macs[ETH_ALEN] =
 /** Default FCoE forwarded MAC address */
 static uint8_t default_fcf_mac[ETH_ALEN] =
 	{ 0x0e, 0xfc, 0x00, 0xff, 0xff, 0xfe };
+
+/** Maximum number of VLAN requests before giving up on VLAN discovery */
+#define FCOE_MAX_VLAN_REQUESTS 2
+
+/** Delay between retrying VLAN requests */
+#define FCOE_VLAN_RETRY_DELAY ( TICKS_PER_SEC )
+
+/** Delay between retrying polling VLAN requests */
+#define FCOE_VLAN_POLL_DELAY ( 30 * TICKS_PER_SEC )
 
 /** Maximum number of FIP solicitations before giving up on FIP */
 #define FCOE_MAX_FIP_SOLICITATIONS 2
@@ -166,6 +180,9 @@ static struct fcoe_port * fcoe_demux ( struct net_device *netdev ) {
  */
 static void fcoe_reset ( struct fcoe_port *fcoe ) {
 
+	/* Detach FC port, if any */
+	intf_restart ( &fcoe->transport, -ECANCELED );
+
 	/* Reset any FIP state */
 	stop_timer ( &fcoe->timer );
 	fcoe->timeouts = 0;
@@ -182,8 +199,9 @@ static void fcoe_reset ( struct fcoe_port *fcoe ) {
 	     netdev_link_ok ( fcoe->netdev ) ) {
 		fcoe->flags |= FCOE_HAVE_NETWORK;
 		start_timer_nodelay ( &fcoe->timer );
-		DBGC ( fcoe, "FCoE %s starting FIP solicitation\n",
-		       fcoe->netdev->name );
+		DBGC ( fcoe, "FCoE %s starting %s\n", fcoe->netdev->name,
+		       ( vlan_can_be_trunk ( fcoe->netdev ) ?
+			 "VLAN discovery" : "FIP solicitation" ) );
 	}
 
 	/* Send notification of window change */
@@ -515,7 +533,9 @@ static int fcoe_fip_parse ( struct fcoe_port *fcoe, struct fip_header *fiphdr,
 		/* Handle descriptors that we understand */
 		if ( ( desc_type > FIP_RESERVED ) &&
 		     ( desc_type < FIP_NUM_DESCRIPTOR_TYPES ) ) {
-			descs->desc[desc_type] = desc;
+			/* Use only the first instance of a descriptor */
+			if ( descs->desc[desc_type] == NULL )
+				descs->desc[desc_type] = desc;
 			continue;
 		}
 
@@ -529,6 +549,100 @@ static int fcoe_fip_parse ( struct fcoe_port *fcoe, struct fip_header *fiphdr,
 
 		/* Ignore non-critical descriptors that we cannot understand */
 	}
+
+	return 0;
+}
+
+/**
+ * Send FIP VLAN request
+ *
+ * @v fcoe		FCoE port
+ * @ret rc		Return status code
+ */
+static int fcoe_fip_tx_vlan ( struct fcoe_port *fcoe ) {
+	struct io_buffer *iobuf;
+	struct {
+		struct fip_header hdr;
+		struct fip_mac_address mac_address;
+	} __attribute__ (( packed )) *request;
+	int rc;
+
+	/* Allocate I/O buffer */
+	iobuf = alloc_iob ( MAX_LL_HEADER_LEN + sizeof ( *request ) );
+	if ( ! iobuf )
+		return -ENOMEM;
+	iob_reserve ( iobuf, MAX_LL_HEADER_LEN );
+
+	/* Construct VLAN request */
+	request = iob_put ( iobuf, sizeof ( *request ) );
+	memset ( request, 0, sizeof ( *request ) );
+	request->hdr.version = FIP_VERSION;
+	request->hdr.code = htons ( FIP_CODE_VLAN );
+	request->hdr.subcode = FIP_VLAN_REQUEST;
+	request->hdr.len = htons ( ( sizeof ( *request ) -
+				     sizeof ( request->hdr ) ) / 4 );
+	request->mac_address.type = FIP_MAC_ADDRESS;
+	request->mac_address.len =
+		( sizeof ( request->mac_address ) / 4 );
+	memcpy ( request->mac_address.mac, fcoe->netdev->ll_addr,
+		 sizeof ( request->mac_address.mac ) );
+
+	/* Send VLAN request */
+	if ( ( rc = net_tx ( iob_disown ( iobuf ), fcoe->netdev,
+			     &fip_protocol, all_fcf_macs,
+			     fcoe->netdev->ll_addr ) ) != 0 ) {
+		DBGC ( fcoe, "FCoE %s could not send VLAN request: "
+		       "%s\n", fcoe->netdev->name, strerror ( rc ) );
+		return rc;
+	}
+
+	return 0;
+}
+
+/**
+ * Handle received FIP VLAN notification
+ *
+ * @v fcoe		FCoE port
+ * @v descs		Descriptor list
+ * @v flags		Flags
+ * @ret rc		Return status code
+ */
+static int fcoe_fip_rx_vlan ( struct fcoe_port *fcoe,
+			      struct fip_descriptors *descs,
+			      unsigned int flags __unused ) {
+	struct fip_mac_address *mac_address = fip_mac_address ( descs );
+	struct fip_vlan *vlan = fip_vlan ( descs );
+	unsigned int tag;
+	int rc;
+
+	/* Sanity checks */
+	if ( ! mac_address ) {
+		DBGC ( fcoe, "FCoE %s received VLAN notification missing MAC "
+		       "address\n", fcoe->netdev->name );
+		return -EINVAL;
+	}
+	if ( ! vlan ) {
+		DBGC ( fcoe, "FCoE %s received VLAN notification missing VLAN "
+		       "tag\n", fcoe->netdev->name );
+		return -EINVAL;
+	}
+
+	/* Create VLAN */
+	tag = ntohs ( vlan->vlan );
+	DBGC ( fcoe, "FCoE %s creating VLAN %d for FCF %s\n",
+	       fcoe->netdev->name, tag, eth_ntoa ( mac_address->mac ) );
+	if ( ( rc = vlan_create ( fcoe->netdev, tag,
+				  FCOE_VLAN_PRIORITY ) ) != 0 ) {
+		DBGC ( fcoe, "FCoE %s could not create VLAN %d: %s\n",
+		       fcoe->netdev->name, tag, strerror ( rc ) );
+		return rc;
+	}
+
+	/* Record that a VLAN was found.  This FCoE port will play no
+	 * further active role; the real FCoE traffic will use the
+	 * port automatically created for the new VLAN device.
+	 */
+	fcoe->flags |= FCOE_VLAN_FOUND;
 
 	return 0;
 }
@@ -646,14 +760,12 @@ static int fcoe_fip_rx_advertisement ( struct fcoe_port *fcoe,
 				fcoe->flags |= FCOE_FCF_ALLOWS_SPMA;
 			memcpy ( fcoe->fcf_mac, mac_address->mac,
 				 sizeof ( fcoe->fcf_mac ) );
-			DBGC ( fcoe, "FCoE %s selected FCF %s (priority %d, ",
+			DBGC ( fcoe, "FCoE %s selected FCF %s (pri %d",
 			       fcoe->netdev->name, eth_ntoa ( fcoe->fcf_mac ),
 			       fcoe->priority );
 			if ( fcoe->keepalive ) {
-				DBGC ( fcoe, "keepalive %dms",
+				DBGC ( fcoe, ", FKA ADV %dms",
 				       fcoe->keepalive );
-			} else {
-				DBGC ( fcoe, "no keepalive" );
 			}
 			DBGC ( fcoe, ", %cPMA)\n",
 			       ( ( fcoe->flags & FCOE_FCF_ALLOWS_SPMA ) ?
@@ -797,6 +909,8 @@ struct fip_handler {
 
 /** FIP handlers */
 static struct fip_handler fip_handlers[] = {
+	{ FIP_CODE_VLAN, FIP_VLAN_NOTIFY,
+	  fcoe_fip_rx_vlan },
 	{ FIP_CODE_DISCOVERY, FIP_DISCOVERY_ADVERTISE,
 	  fcoe_fip_rx_advertisement },
 	{ FIP_CODE_ELS, FIP_ELS_RESPONSE,
@@ -884,6 +998,7 @@ static int fcoe_fip_rx ( struct io_buffer *iobuf,
 static void fcoe_expired ( struct retry_timer *timer, int over __unused ) {
 	struct fcoe_port *fcoe =
 		container_of ( timer, struct fcoe_port, timer );
+	int rc;
 
 	/* Sanity check */
 	assert ( fcoe->flags & FCOE_HAVE_NETWORK );
@@ -891,19 +1006,64 @@ static void fcoe_expired ( struct retry_timer *timer, int over __unused ) {
 	/* Increment the timeout counter */
 	fcoe->timeouts++;
 
-	if ( ! ( fcoe->flags & FCOE_HAVE_FCF ) ) {
+	if ( vlan_can_be_trunk ( fcoe->netdev ) &
+	     ! ( fcoe->flags & FCOE_VLAN_TIMED_OUT ) ) {
+
+		/* If we have already found a VLAN, send infrequent
+		 * VLAN requests, in case VLAN information changes.
+		 */
+		if ( fcoe->flags & FCOE_VLAN_FOUND ) {
+			fcoe->flags &= ~FCOE_VLAN_FOUND;
+			fcoe->timeouts = 0;
+			start_timer_fixed ( &fcoe->timer,
+					    FCOE_VLAN_POLL_DELAY );
+			fcoe_fip_tx_vlan ( fcoe );
+			return;
+		}
+
+		/* If we have not yet found a VLAN, and we have not
+		 * yet timed out and given up on finding one, then
+		 * send a VLAN request and wait.
+		 */
+		if ( fcoe->timeouts <= FCOE_MAX_VLAN_REQUESTS ) {
+			start_timer_fixed ( &fcoe->timer,
+					    FCOE_VLAN_RETRY_DELAY );
+			fcoe_fip_tx_vlan ( fcoe );
+			return;
+		}
+
+		/* We have timed out waiting for a VLAN; proceed to
+		 * FIP discovery.
+		 */
+		fcoe->flags |= FCOE_VLAN_TIMED_OUT;
+		fcoe->timeouts = 0;
+		DBGC ( fcoe, "FCoE %s giving up on VLAN discovery\n",
+		       fcoe->netdev->name );
+		start_timer_nodelay ( &fcoe->timer );
+
+	} else if ( ! ( fcoe->flags & FCOE_HAVE_FCF ) ) {
 
 		/* If we have not yet found a FIP-capable forwarder,
 		 * and we have not yet timed out and given up on
 		 * finding one, then send a FIP solicitation and wait.
 		 */
+		start_timer_fixed ( &fcoe->timer, FCOE_FIP_RETRY_DELAY );
 		if ( ( ! ( fcoe->flags & FCOE_HAVE_FIP_FCF ) ) &&
 		     ( fcoe->timeouts <= FCOE_MAX_FIP_SOLICITATIONS ) ) {
-			start_timer_fixed ( &fcoe->timer,
-					    FCOE_FIP_RETRY_DELAY );
 			fcoe_fip_tx_solicitation ( fcoe );
 			return;
 		}
+
+		/* Attach Fibre Channel port */
+		if ( ( rc = fc_port_open ( &fcoe->transport, &fcoe->node_wwn.fc,
+					   &fcoe->port_wwn.fc,
+					   fcoe->netdev->name ) ) != 0 ) {
+			DBGC ( fcoe, "FCoE %s could not create FC port: %s\n",
+			       fcoe->netdev->name, strerror ( rc ) );
+			/* We will try again on the next timer expiry */
+			return;
+		}
+		stop_timer ( &fcoe->timer );
 
 		/* Either we have found a FIP-capable forwarder, or we
 		 * have timed out and will fall back to pre-FIP mode.
@@ -979,16 +1139,10 @@ static int fcoe_probe ( struct net_device *netdev ) {
 	       fc_ntoa ( &fcoe->node_wwn.fc ) );
 	DBGC ( fcoe, " port %s\n", fc_ntoa ( &fcoe->port_wwn.fc ) );
 
-	/* Attach Fibre Channel port */
-	if ( ( rc = fc_port_open ( &fcoe->transport, &fcoe->node_wwn.fc,
-				   &fcoe->port_wwn.fc ) ) != 0 )
-		goto err_fc_create;
-
 	/* Transfer reference to port list */
 	list_add ( &fcoe->list, &fcoe_ports );
 	return 0;
 
- err_fc_create:
 	netdev_put ( fcoe->netdev );
  err_zalloc:
  err_non_ethernet:
@@ -1010,8 +1164,12 @@ static void fcoe_notify ( struct net_device *netdev ) {
 		return;
 	}
 
-	/* Reset the FCoE link */
-	fcoe_reset ( fcoe );
+	/* Reset the FCoE link if necessary */
+	if ( ! ( netdev_is_open ( netdev ) &&
+		 netdev_link_ok ( netdev ) &&
+		 ( fcoe->flags & FCOE_HAVE_NETWORK ) ) ) {
+		fcoe_reset ( fcoe );
+	}
 }
 
 /**

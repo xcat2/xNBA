@@ -234,6 +234,12 @@ REQUIRE_OBJECT ( pxe_cmd );
 #ifdef LOTEST_CMD
 REQUIRE_OBJECT ( lotest_cmd );
 #endif
+#ifdef VLAN_CMD
+REQUIRE_OBJECT ( vlan_cmd );
+#endif
+#ifdef REBOOT_CMD
+REQUIRE_OBJECT ( reboot_cmd );
+#endif
 
 /*
  * Drag in miscellaneous objects
