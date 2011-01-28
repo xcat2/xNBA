@@ -73,6 +73,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_spi		     ( ERRFILE_DRIVER | 0x00110000 )
 #define ERRFILE_i2c_bit		     ( ERRFILE_DRIVER | 0x00120000 )
 #define ERRFILE_spi_bit		     ( ERRFILE_DRIVER | 0x00130000 )
+#define ERRFILE_nvsvpd		     ( ERRFILE_DRIVER | 0x00140000 )
 
 #define ERRFILE_3c509		     ( ERRFILE_DRIVER | 0x00200000 )
 #define ERRFILE_bnx2		     ( ERRFILE_DRIVER | 0x00210000 )
@@ -234,6 +235,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_ifmgmt_cmd	      ( ERRFILE_OTHER | 0x001d0000 )
 #define ERRFILE_fcmgmt_cmd	      ( ERRFILE_OTHER | 0x001e0000 )
 #define ERRFILE_gdbstub_cmd	      ( ERRFILE_OTHER | 0x001f0000 )
+#define ERRFILE_sanboot_cmd	      ( ERRFILE_OTHER | 0x00200000 )
 
 /** @} */
 
