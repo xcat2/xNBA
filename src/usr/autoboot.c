@@ -153,38 +153,6 @@ struct setting skip_san_boot_setting __setting = {
  * @v root_path		Root path
  * @ret rc		Return status code
  */
-int reg_root_path ( const char *root_path ) {
-	struct uri *uri;
-	int drive;
-	int rc;
-
-	/* Parse URI */
-	uri = parse_uri ( root_path );
-	if ( ! uri ) {
-		printf("Unrecognized root path, ignoring\n");
-		return 0; // Not necessarily an error in this case, since this is PXE and FreeBSD may have it's own thing to say, as an example
-	}
-	if ( ( drive = san_hook ( uri, 0 ) ) < 0 ) {
-		rc = drive;
-		printf ( "Could not open SAN device: %s\n",
-			 strerror ( rc ) );
-		uri_put ( uri );
-		return 0;
-	}
-	printf ( "Registered as SAN device %#02x\n", drive );
-	/* Describe SAN device */
-	if ( ( rc = san_describe ( drive ) ) != 0 ) {
-		printf ( "Could not describe SAN device %#02x: %s\n",
-			 drive, strerror ( rc ) );
-		uri_put(uri);
-		return 0;
-	}
-	//If still in function, we registered fine.  
-	//Unclear whether uri should have it's refcnt decremented in this case
-        //in boot_root_path, it would not be, so matching that behavior for now
-	return rc;
-  
-}
 int boot_root_path ( const char *root_path ) {
 	struct uri *uri;
 	int drive;
@@ -279,7 +247,6 @@ int netboot ( struct net_device *netdev ) {
 	struct setting pxe_boot_menu_setting
 		= { .tag = DHCP_PXE_BOOT_MENU };
 	char buf[256];
-	char rbuf[256];
 	struct in_addr next_server;
 	unsigned int pxe_discovery_control;
 	int rc;
@@ -314,11 +281,6 @@ int netboot ( struct net_device *netdev ) {
 	fetch_ipv4_setting ( NULL, &next_server_setting, &next_server );
 	fetch_string_setting ( NULL, &filename_setting, buf, sizeof ( buf ) );
 	if ( buf[0] ) {
-		fetch_string_setting ( NULL, &root_path_setting, rbuf, sizeof ( buf ) );
-		if ( rbuf[0] ) {
-			printf ( "Attempting SAN registration per root path \"%s\"\n", rbuf );
-			reg_root_path ( rbuf );
-		}
 		printf ( "Booting from filename \"%s\"\n", buf );
 		return boot_next_server_and_filename ( next_server, buf );
 	}
