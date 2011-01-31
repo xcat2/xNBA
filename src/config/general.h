@@ -24,8 +24,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
  * "iPXE".
  *
  */
-#define PRODUCT_NAME ""
-#define PRODUCT_SHORT_NAME "iPXE"
+#define PRODUCT_NAME "xCAT Network Boot Agent"
+#define PRODUCT_SHORT_NAME "xNBA"
 
 /*
  * Timer configuration
