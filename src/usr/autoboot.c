@@ -66,8 +66,9 @@ static struct net_device * find_boot_netdev ( void ) {
  */
 static struct uri * parse_next_server_and_filename ( struct in_addr next_server,
 						     const char *filename ) {
+	char buf[ 23 /* "tftp://xxx.xxx.xxx.xxx/" */ + strlen ( filename )
+		  + 1 /* NUL */ ];
 	struct uri *uri;
-	struct uri *tmp;
 
 	/* Parse filename */
 	uri = parse_uri ( filename );
@@ -80,12 +81,11 @@ static struct uri * parse_next_server_and_filename ( struct in_addr next_server,
 	 * filenames with and without initial slashes, which is
 	 * significant for TFTP.
 	 */
-	if ( ! uri_is_absolute ( uri ) ) {
-		tmp = uri;
-		tmp->scheme = "tftp";
-		tmp->host = inet_ntoa ( next_server );
-		uri = uri_dup ( tmp );
-		uri_put ( tmp );
+	if ( next_server.s_addr && filename[0] && ! uri_is_absolute ( uri ) ) {
+		uri_put ( uri );
+		snprintf ( buf, sizeof ( buf ), "tftp://%s/%s",
+			   inet_ntoa ( next_server ), filename );
+		uri = parse_uri ( buf );
 		if ( ! uri )
 			return NULL;
 	}
@@ -130,7 +130,7 @@ int uriboot ( struct uri *filename, struct uri *root_path ) {
 	}
 
 	/* Treat empty URIs as absent */
-	if ( filename && ( ! filename->path ) )
+	if ( filename && ( ! uri_has_path ( filename ) ) )
 		filename = NULL;
 	if ( root_path && ( ! uri_is_absolute ( root_path ) ) )
 		root_path = NULL;
