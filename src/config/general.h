@@ -40,14 +40,14 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 #define	NET_PROTO_IPV4		/* IPv4 protocol */
-#define	NET_PROTO_FCOE		/* Fibre Channel over Ethernet protocol */
+#undef	NET_PROTO_FCOE		/* Fibre Channel over Ethernet protocol */
 
 /*
  * PXE support
  *
  */
 //#undef	PXE_STACK		/* PXE stack in iPXE - you want this! */
-//#undef	PXE_MENU		/* PXE menu booting */
+#undef	PXE_MENU		/* PXE menu booting */
 
 /*
  * Download protocols
@@ -67,9 +67,9 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 #define	SANBOOT_PROTO_ISCSI	/* iSCSI protocol */
-#define	SANBOOT_PROTO_AOE	/* AoE protocol */
-#define	SANBOOT_PROTO_IB_SRP	/* Infiniband SCSI RDMA protocol */
-#define	SANBOOT_PROTO_FCP	/* Fibre Channel protocol */
+#undef	SANBOOT_PROTO_AOE	/* AoE protocol */
+#undef	SANBOOT_PROTO_IB_SRP	/* Infiniband SCSI RDMA protocol */
+#undef	SANBOOT_PROTO_FCP	/* Fibre Channel protocol */
 
 /*
  * 802.11 cryptosystems and handshaking protocols
@@ -93,39 +93,39 @@ FILE_LICENCE ( GPL2_OR_LATER );
  * you want to use.
  *
  */
-//#define	IMAGE_NBI		/* NBI image support */
+#undef	IMAGE_NBI		/* NBI image support */
 //#define	IMAGE_ELF		/* ELF image support */
-//#define	IMAGE_FREEBSD		/* FreeBSD kernel image support */
-//#define	IMAGE_MULTIBOOT		/* MultiBoot image support */
-//#define	IMAGE_AOUT		/* a.out image support */
-//#define	IMAGE_WINCE		/* WinCE image support */
+#undef	IMAGE_FREEBSD		/* FreeBSD kernel image support */
+#undef	IMAGE_MULTIBOOT		/* MultiBoot image support */
+#undef	IMAGE_AOUT		/* a.out image support */
+#undef	IMAGE_WINCE		/* WinCE image support */
 #define	IMAGE_PXE		/* PXE image support */
 #define	IMAGE_SCRIPT		/* iPXE script image support */
 #define	IMAGE_BZIMAGE		/* Linux bzImage image support */
-//#define	IMAGE_COMBOOT		/* SYSLINUX COMBOOT image support */
+#undef	IMAGE_COMBOOT		/* SYSLINUX COMBOOT image support */
 //#define	IMAGE_EFI		/* EFI image support */
 
 /*
  * Command-line commands to include
  *
  */
-#define	AUTOBOOT_CMD		/* Automatic booting */
+#undef	AUTOBOOT_CMD		/* Automatic booting */
 #define	NVO_CMD			/* Non-volatile option storage commands */
-#define	CONFIG_CMD		/* Option configuration console */
-#define	IFMGMT_CMD		/* Interface management commands */
+#undef	CONFIG_CMD		/* Option configuration console */
+#undef	IFMGMT_CMD		/* Interface management commands */
 #undef	IWMGMT_CMD		/* Wireless interface management commands */
-#define FCMGMT_CMD		/* Fibre Channel management commands */
-#define	ROUTE_CMD		/* Routing table management commands */
+#undef FCMGMT_CMD		/* Fibre Channel management commands */
+#undef	ROUTE_CMD		/* Routing table management commands */
 #define IMAGE_CMD		/* Image management commands */
-#define DHCP_CMD		/* DHCP management commands */
+#undef DHCP_CMD		/* DHCP management commands */
 #define SANBOOT_CMD		/* SAN boot commands */
-#define LOGIN_CMD		/* Login command */
+#undef LOGIN_CMD		/* Login command */
 #undef	TIME_CMD		/* Time commands */
 #undef	DIGEST_CMD		/* Image crypto digest commands */
 #undef	LOTEST_CMD		/* Loopback testing commands */
 #undef	VLAN_CMD		/* VLAN commands */
 #undef	PXE_CMD			/* PXE commands */
-#define	REBOOT_CMD		/* Reboot command */
+#undef	REBOOT_CMD		/* Reboot command */
 
 /*
  * ROM-specific options
