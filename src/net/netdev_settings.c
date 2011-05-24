@@ -40,6 +40,12 @@ struct setting mac_setting __setting ( SETTING_NETDEV ) = {
 	.type = &setting_type_hex,
 	.tag = NETDEV_SETTING_TAG_MAC,
 };
+struct setting machyp_setting __setting ( SETTING_NETDEV ) = {
+	.name = "machyp",
+	.description = "MAC address",
+	.type = &setting_type_hexhyp,
+	.tag = NETDEV_SETTING_TAG_MAC,
+};
 struct setting busid_setting __setting ( SETTING_NETDEV ) = {
 	.name = "busid",
 	.description = "Bus ID",
@@ -75,7 +81,7 @@ static int netdev_store ( struct settings *settings, struct setting *setting,
 	struct net_device *netdev = container_of ( settings, struct net_device,
 						   settings.settings );
 
-	if ( setting_cmp ( setting, &mac_setting ) == 0 ) {
+	if (( setting_cmp ( setting, &mac_setting ) == 0 ) || ( setting_cmp ( setting, &machyp_setting ) == 0 )) {
 		if ( len != netdev->ll_protocol->ll_addr_len )
 			return -EINVAL;
 		memcpy ( netdev->ll_addr, data, len );
@@ -103,7 +109,7 @@ static int netdev_fetch ( struct settings *settings, struct setting *setting,
 	struct device_description *desc = &netdev->dev->desc;
 	struct dhcp_netdev_desc dhcp_desc;
 
-	if ( setting_cmp ( setting, &mac_setting ) == 0 ) {
+	if (( setting_cmp ( setting, &mac_setting ) == 0 ) || ( setting_cmp ( setting, &machyp_setting ) == 0 )) {
 		if ( len > netdev->ll_protocol->ll_addr_len )
 			len = netdev->ll_protocol->ll_addr_len;
 		memcpy ( data, netdev->ll_addr, len );
