@@ -76,16 +76,16 @@ static void embedded_init ( void ) {
 		}
 	}
 
-	/* Load the first image */
+	/* Select the first image */
 	image = &embedded_images[0];
-	if ( ( rc = image_autoload ( image ) ) != 0 ) {
-		DBG ( "Could not load embedded image \"%s\": %s\n",
+	if ( ( rc = image_select ( image ) ) != 0 ) {
+		DBG ( "Could not select embedded image \"%s\": %s\n",
 		      image->name, strerror ( rc ) );
 		return;
 	}
 }
 
 /** Embedded image initialisation function */
-struct init_fn embedded_init_fn __init_fn ( INIT_NORMAL ) = {
+struct init_fn embedded_init_fn __init_fn ( INIT_LATE ) = {
 	.initialise = embedded_init,
 };

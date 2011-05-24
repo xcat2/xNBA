@@ -47,8 +47,7 @@ static struct pci_device_id sis190_isa_bridge_tbl[] = {
 	PCI_ID (0x1039, 0x0968, "", "", 0),
 };
 
-static int sis190_isa_bridge_probe(struct pci_device *pdev __unused,
-				   const struct pci_device_id *ent __unused)
+static int sis190_isa_bridge_probe(struct pci_device *pdev __unused)
 {
 	return 0;
 }
@@ -1110,12 +1109,10 @@ static struct net_device_operations sis190_netdev_ops = {
 	.irq = sis190_irq,
 };
 
-static int sis190_probe(struct pci_device *pdev,
-			   const struct pci_device_id *ent __unused)
+static int sis190_probe(struct pci_device *pdev)
 {
 	struct sis190_private *tp;
 	struct net_device *dev;
-	void *ioaddr;
 	int rc;
 
 	rc = sis190_init_board(pdev, &dev);
@@ -1126,7 +1123,6 @@ static int sis190_probe(struct pci_device *pdev,
 	pci_set_drvdata(pdev, dev);
 
 	tp = netdev_priv(dev);
-	ioaddr = tp->mmio_addr;
 
 	rc = sis190_get_mac_addr(pdev, dev);
 	if (rc < 0)

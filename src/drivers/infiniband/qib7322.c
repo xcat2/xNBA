@@ -886,7 +886,6 @@ static int qib7322_init_recv ( struct qib7322 *qib7322 ) {
 	unsigned long egrbase;
 	unsigned int eager_array_size_kernel;
 	unsigned int eager_array_size_user;
-	unsigned int user_context_mask;
 	unsigned int ctx;
 
 	/* Select configuration based on number of contexts */
@@ -895,19 +894,16 @@ static int qib7322_init_recv ( struct qib7322 *qib7322 ) {
 		contextcfg = QIB7322_CONTEXTCFG_6CTX;
 		eager_array_size_kernel = QIB7322_EAGER_ARRAY_SIZE_6CTX_KERNEL;
 		eager_array_size_user = QIB7322_EAGER_ARRAY_SIZE_6CTX_USER;
-		user_context_mask = 0x000f;
 		break;
 	case 10:
 		contextcfg = QIB7322_CONTEXTCFG_10CTX;
 		eager_array_size_kernel = QIB7322_EAGER_ARRAY_SIZE_10CTX_KERNEL;
 		eager_array_size_user = QIB7322_EAGER_ARRAY_SIZE_10CTX_USER;
-		user_context_mask = 0x00ff;
 		break;
 	case 18:
 		contextcfg = QIB7322_CONTEXTCFG_18CTX;
 		eager_array_size_kernel = QIB7322_EAGER_ARRAY_SIZE_18CTX_KERNEL;
 		eager_array_size_user = QIB7322_EAGER_ARRAY_SIZE_18CTX_USER;
-		user_context_mask = 0xffff;
 		break;
 	default:
 		linker_assert ( 0, invalid_QIB7322_NUM_CONTEXTS );
@@ -2281,8 +2277,7 @@ static void qib7322_reset ( struct qib7322 *qib7322, struct pci_device *pci ) {
  * @v id		PCI ID
  * @ret rc		Return status code
  */
-static int qib7322_probe ( struct pci_device *pci,
-			   const struct pci_device_id *id __unused ) {
+static int qib7322_probe ( struct pci_device *pci ) {
 	struct qib7322 *qib7322;
 	struct QIB_7322_Revision revision;
 	struct ib_device *ibdev;

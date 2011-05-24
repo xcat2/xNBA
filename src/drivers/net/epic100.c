@@ -10,7 +10,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/pci.h>
 #include <ipxe/ethernet.h>
 #include "nic.h"
-#include "console.h"
+#include <ipxe/console.h>
 #include "epic100.h"
 
 /* Condensed operations for readability */
@@ -231,7 +231,6 @@ static void set_rx_mode(void)
 epic100_open(void)
 {
     int mii_reg5;
-    int full_duplex = 0;
     unsigned long tmp;
 
     epic100_init_ring();
@@ -245,7 +244,6 @@ epic100_open(void)
 
     mii_reg5 = mii_read(phys[0], 5);
     if (mii_reg5 != 0xffff && (mii_reg5 & 0x0100)) {
-	full_duplex = 1;
 	printf(" full-duplex mode");
 	tmp |= TC_LM_FULL_DPX;
     } else

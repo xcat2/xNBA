@@ -24,7 +24,7 @@ FILE_LICENCE ( GPL_ANY );
 #include <errno.h>
 #include <assert.h>
 #include <byteswap.h>
-#include <console.h>
+#include <ipxe/console.h>
 #include <ipxe/io.h>
 #include <ipxe/pci.h>
 #include <ipxe/malloc.h>
@@ -3073,11 +3073,9 @@ static void
 clear_b0_fpga_memories ( struct efab_nic *efab)
 {
 	efab_oword_t blanko, temp;
-	efab_dword_t blankd;
 	int offset; 
 
 	EFAB_ZERO_OWORD ( blanko );
-	EFAB_ZERO_DWORD ( blankd );
 
 	/* Clear the address region register */
 	EFAB_POPULATE_OWORD_4 ( temp,
@@ -3175,7 +3173,7 @@ static void
 falcon_probe_nic_variant ( struct efab_nic *efab, struct pci_device *pci )
 {
 	efab_oword_t altera_build, nic_stat;
-	int is_pcie, fpga_version;
+	int fpga_version;
 	uint8_t revision;
 
 	/* PCI revision */
@@ -3190,16 +3188,13 @@ falcon_probe_nic_variant ( struct efab_nic *efab, struct pci_device *pci )
 	/* MAC and PCI type */
 	falcon_read ( efab, &nic_stat, FCN_NIC_STAT_REG );
 	if ( efab->pci_revision == FALCON_REV_B0 ) {
-		is_pcie = 1;
 		efab->phy_10g = EFAB_OWORD_FIELD ( nic_stat, FCN_STRAP_10G );
 	}
 	else if ( efab->is_asic ) {
-		is_pcie = EFAB_OWORD_FIELD ( nic_stat, FCN_STRAP_PCIE );
 		efab->phy_10g = EFAB_OWORD_FIELD ( nic_stat, FCN_STRAP_10G );
 	}
 	else {
 		int minor = EFAB_OWORD_FIELD ( altera_build,  FCN_VER_MINOR );
-		is_pcie = 0;
 		efab->phy_10g = ( minor == 0x14 );
 	}
 }
@@ -4129,8 +4124,7 @@ efab_remove ( struct pci_device *pci )
 }
 
 static int
-efab_probe ( struct pci_device *pci,
-	     const struct pci_device_id *id )
+efab_probe ( struct pci_device *pci )
 {
 	struct net_device *netdev;
 	struct efab_nic *efab;
@@ -4190,7 +4184,7 @@ efab_probe ( struct pci_device *pci,
 			goto fail5;
 	}
 
-	EFAB_LOG ( "Found %s EtherFabric %s %s revision %d\n", id->name,
+	EFAB_LOG ( "Found %s EtherFabric %s %s revision %d\n", pci->id->name,
 		   efab->is_asic ? "ASIC" : "FPGA",
 		   efab->phy_10g ? "10G" : "1G",
 		   efab->pci_revision );

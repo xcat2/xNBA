@@ -64,6 +64,22 @@ FILE_LICENCE ( GPL2_OR_LATER );
 	  ( offsetof ( _structure, _field ) << 8 ) )
 
 /**
+ * Check applicability of SMBIOS setting
+ *
+ * @v settings		Settings block
+ * @v setting		Setting
+ * @ret applies		Setting applies within this settings block
+ */
+static int smbios_applies ( struct settings *settings __unused,
+			    struct setting *setting ) {
+	unsigned int tag_magic;
+
+	/* Check tag magic */
+	tag_magic = ( setting->tag >> 24 );
+	return ( tag_magic == SMBIOS_TAG_MAGIC );
+}
+
+/**
  * Fetch value of SMBIOS setting
  *
  * @v settings		Settings block, or NULL to search all blocks
@@ -87,8 +103,7 @@ static int smbios_fetch ( struct settings *settings __unused,
 	tag_type = ( ( setting->tag >> 16 ) & 0xff );
 	tag_offset = ( ( setting->tag >> 8 ) & 0xff );
 	tag_len = ( setting->tag & 0xff );
-	if ( tag_magic != SMBIOS_TAG_MAGIC )
-		return -ENOENT;
+	assert ( tag_magic == SMBIOS_TAG_MAGIC );
 
 	/* Find SMBIOS structure */
 	if ( ( rc = find_smbios_structure ( tag_type, &structure ) ) != 0 )
@@ -119,6 +134,7 @@ static int smbios_fetch ( struct settings *settings __unused,
 
 /** SMBIOS settings operations */
 static struct settings_operations smbios_settings_operations = {
+	.applies = smbios_applies,
 	.fetch = smbios_fetch,
 };
 
@@ -149,7 +165,7 @@ struct init_fn smbios_init_fn __init_fn ( INIT_NORMAL ) = {
 };
 
 /** UUID setting obtained via SMBIOS */
-struct setting uuid_setting __setting = {
+struct setting uuid_setting __setting ( SETTING_HOST ) = {
 	.name = "uuid",
 	.description = "UUID",
 	.tag = SMBIOS_RAW_TAG ( SMBIOS_TYPE_SYSTEM_INFORMATION,
@@ -158,7 +174,7 @@ struct setting uuid_setting __setting = {
 };
 
 /** Other SMBIOS named settings */
-struct setting smbios_named_settings[] __setting = {
+struct setting smbios_named_settings[] __setting ( SETTING_HOST_EXTRA ) = {
 	{
 		.name = "manufacturer",
 		.description = "Manufacturer",

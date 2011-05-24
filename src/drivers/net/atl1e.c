@@ -319,11 +319,7 @@ static void atl1e_cal_ring_size(struct atl1e_adapter *adapter, u32 *ring_size)
 
 static void atl1e_init_ring_resources(struct atl1e_adapter *adapter)
 {
-	struct atl1e_tx_ring *tx_ring = NULL;
-	struct atl1e_rx_ring *rx_ring = NULL;
-
-	tx_ring = &adapter->tx_ring;
-	rx_ring = &adapter->rx_ring;
+	struct atl1e_rx_ring *rx_ring = &adapter->rx_ring;
 
 	rx_ring->real_page_size = adapter->rx_ring.page_size
 				 + MAX_FRAME_SIZE
@@ -1123,8 +1119,7 @@ static void atl1e_init_netdev(struct net_device *netdev, struct pci_device *pdev
  * The OS initialization, configuring of the adapter private structure,
  * and a hardware reset occur.
  */
-static int atl1e_probe(struct pci_device *pdev,
-		       const struct pci_device_id *ent __unused)
+static int atl1e_probe(struct pci_device *pdev)
 {
 	struct net_device *netdev;
 	struct atl1e_adapter *adapter = NULL;

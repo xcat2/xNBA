@@ -46,14 +46,20 @@ struct list_head net_devices = LIST_HEAD_INIT ( net_devices );
 /** List of open network devices, in reverse order of opening */
 static struct list_head open_net_devices = LIST_HEAD_INIT ( open_net_devices );
 
-/** Default link status code */
+/** Default unknown link status code */
 #define EUNKNOWN_LINK_STATUS __einfo_error ( EINFO_EUNKNOWN_LINK_STATUS )
 #define EINFO_EUNKNOWN_LINK_STATUS \
 	__einfo_uniqify ( EINFO_EINPROGRESS, 0x01, "Unknown" )
 
-/** Human-readable message for the default link status */
+/** Default link-down status code */
+#define ENOTCONN_LINK_DOWN __einfo_error ( EINFO_ENOTCONN_LINK_DOWN )
+#define EINFO_ENOTCONN_LINK_DOWN \
+	__einfo_uniqify ( EINFO_ENOTCONN, 0x01, "Down" )
+
+/** Human-readable message for the default link statuses */
 struct errortab netdev_errors[] __errortab = {
 	__einfo_errortab ( EINFO_EUNKNOWN_LINK_STATUS ),
+	__einfo_errortab ( EINFO_ENOTCONN_LINK_DOWN ),
 };
 
 /**
@@ -101,7 +107,7 @@ void netdev_link_down ( struct net_device *netdev ) {
 	 */
 	if ( ( netdev->link_rc == 0 ) ||
 	     ( netdev->link_rc == -EUNKNOWN_LINK_STATUS ) ) {
-		netdev_link_err ( netdev, -ENOTCONN );
+		netdev_link_err ( netdev, -ENOTCONN_LINK_DOWN );
 	}
 }
 
@@ -157,8 +163,8 @@ static void netdev_record_stat ( struct net_device_stats *stats, int rc ) {
 int netdev_tx ( struct net_device *netdev, struct io_buffer *iobuf ) {
 	int rc;
 
-	DBGC ( netdev, "NETDEV %s transmitting %p (%p+%zx)\n",
-	       netdev->name, iobuf, iobuf->data, iob_len ( iobuf ) );
+	DBGC2 ( netdev, "NETDEV %s transmitting %p (%p+%zx)\n",
+		netdev->name, iobuf, iobuf->data, iob_len ( iobuf ) );
 
 	/* Enqueue packet */
 	list_add_tail ( &iobuf->list, &netdev->tx_queue );
@@ -202,16 +208,15 @@ void netdev_tx_complete_err ( struct net_device *netdev,
 	/* Update statistics counter */
 	netdev_record_stat ( &netdev->tx_stats, rc );
 	if ( rc == 0 ) {
-		DBGC ( netdev, "NETDEV %s transmission %p complete\n",
-		       netdev->name, iobuf );
+		DBGC2 ( netdev, "NETDEV %s transmission %p complete\n",
+			netdev->name, iobuf );
 	} else {
 		DBGC ( netdev, "NETDEV %s transmission %p failed: %s\n",
 		       netdev->name, iobuf, strerror ( rc ) );
 	}
 
 	/* Catch data corruption as early as possible */
-	assert ( iobuf->list.next != NULL );
-	assert ( iobuf->list.prev != NULL );
+	list_check_contains ( iobuf, &netdev->tx_queue, list );
 
 	/* Dequeue and free I/O buffer */
 	list_del ( &iobuf->list );
@@ -259,8 +264,8 @@ static void netdev_tx_flush ( struct net_device *netdev ) {
  */
 void netdev_rx ( struct net_device *netdev, struct io_buffer *iobuf ) {
 
-	DBGC ( netdev, "NETDEV %s received %p (%p+%zx)\n",
-	       netdev->name, iobuf, iobuf->data, iob_len ( iobuf ) );
+	DBGC2 ( netdev, "NETDEV %s received %p (%p+%zx)\n",
+		netdev->name, iobuf, iobuf->data, iob_len ( iobuf ) );
 
 	/* Discard packet (for test purposes) if applicable */
 	if ( ( NETDEV_DISCARD_RATE > 0 ) &&
@@ -463,12 +468,12 @@ int netdev_open ( struct net_device *netdev ) {
 
 	DBGC ( netdev, "NETDEV %s opening\n", netdev->name );
 
-	/* Mark as opened */
-	netdev->state |= NETDEV_OPEN;
-
 	/* Open the device */
 	if ( ( rc = netdev->op->open ( netdev ) ) != 0 )
 		return rc;
+
+	/* Mark as opened */
+	netdev->state |= NETDEV_OPEN;
 
 	/* Add to head of open devices list */
 	list_add ( &netdev->open_list, &open_net_devices );
@@ -712,9 +717,9 @@ void net_poll ( void ) {
 		 */
 		if ( ( iobuf = netdev_rx_dequeue ( netdev ) ) ) {
 
-			DBGC ( netdev, "NETDEV %s processing %p (%p+%zx)\n",
-			       netdev->name, iobuf, iobuf->data,
-			       iob_len ( iobuf ) );
+			DBGC2 ( netdev, "NETDEV %s processing %p (%p+%zx)\n",
+				netdev->name, iobuf, iobuf->data,
+				iob_len ( iobuf ) );
 
 			/* Remove link-layer header */
 			ll_protocol = netdev->ll_protocol;

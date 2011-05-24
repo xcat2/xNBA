@@ -41,6 +41,11 @@ FILE_LICENCE ( GPL2_OR_LATER );
  *
  */
 
+/* Disambiguate the various error causes */
+#define ENOENT_BOOT __einfo_error ( EINFO_ENOENT_BOOT )
+#define EINFO_ENOENT_BOOT \
+	__einfo_uniqify ( EINFO_ENOENT, 0x01, "Nothing to boot" )
+
 /**
  * Perform PXE menu boot when PXE stack is not available
  */
@@ -94,7 +99,7 @@ static struct uri * parse_next_server_and_filename ( struct in_addr next_server,
 }
 
 /** The "keep-san" setting */
-struct setting keep_san_setting __setting = {
+struct setting keep_san_setting __setting ( SETTING_SANBOOT_EXTRA ) = {
 	.name = "keep-san",
 	.description = "Preserve SAN connection",
 	.tag = DHCP_EB_KEEP_SAN,
@@ -102,9 +107,9 @@ struct setting keep_san_setting __setting = {
 };
 
 /** The "skip-san-boot" setting */
-struct setting skip_san_boot_setting __setting = {
+struct setting skip_san_boot_setting __setting ( SETTING_SANBOOT_EXTRA ) = {
 	.name = "skip-san-boot",
-	.description = "Do not boot the SAN drive after connecting",
+	.description = "Do not boot from SAN device",
 	.tag = DHCP_EB_SKIP_SAN_BOOT,
 	.type = &setting_type_int8,
 };
@@ -114,66 +119,63 @@ struct setting skip_san_boot_setting __setting = {
  *
  * @v filename		Filename
  * @v root_path		Root path
+ * @v drive		SAN drive (if applicable)
+ * @v flags		Boot action flags
  * @ret rc		Return status code
+ *
+ * The somewhat tortuous flow of control in this function exists in
+ * order to ensure that the "sanboot" command remains identical in
+ * function to a SAN boot via a DHCP-specified root path, and to
+ * provide backwards compatibility for the "keep-san" and
+ * "skip-san-boot" options.
  */
-int uriboot ( struct uri *filename, struct uri *root_path ) {
-	struct image *image;
-	int drive;
+int uriboot ( struct uri *filename, struct uri *root_path, int drive,
+	      unsigned int flags ) {
 	int rc;
-
-	/* Allocate image */
-	image = alloc_image();
-	if ( ! image ) {
-		printf ( "Could not allocate image\n" );
-		rc = -ENOMEM;
-		goto err_alloc_image;
-	}
-
-	/* Treat empty URIs as absent */
-	if ( filename && ( ! uri_has_path ( filename ) ) )
-		filename = NULL;
-	if ( root_path && ( ! uri_is_absolute ( root_path ) ) )
-		root_path = NULL;
-
-	/* If we have both a filename and a root path, ignore an
-	 * unsupported URI scheme in the root path, since it may
-	 * represent an NFS root.
-	 */
-	if ( filename && root_path &&
-	     ( xfer_uri_opener ( root_path->scheme ) == NULL ) ) {
-		printf ( "Ignoring unsupported root path\n" );
-		root_path = NULL;
-	}
 
 	/* Hook SAN device, if applicable */
 	if ( root_path ) {
-		drive = san_hook ( root_path, 0 );
-		if ( drive < 0 ) {
-			rc = drive;
+		if ( ( rc = san_hook ( root_path, drive ) ) != 0 ) {
 			printf ( "Could not open SAN device: %s\n",
 				 strerror ( rc ) );
 			goto err_san_hook;
 		}
-		printf ( "Registered as SAN device %#02x\n", drive );
-	} else {
-		drive = -ENODEV;
+		printf ( "Registered SAN device %#02x\n", drive );
 	}
 
 	/* Describe SAN device, if applicable */
-	if ( ( drive >= 0 ) && ( ( rc = san_describe ( drive ) ) != 0 ) ) {
-		printf ( "Could not describe SAN device %#02x: %s\n",
-			 drive, strerror ( rc ) );
-		goto err_san_describe;
+	if ( ( drive >= 0 ) && ! ( flags & URIBOOT_NO_SAN_DESCRIBE ) ) {
+		if ( ( rc = san_describe ( drive ) ) != 0 ) {
+			printf ( "Could not describe SAN device %#02x: %s\n",
+				 drive, strerror ( rc ) );
+			goto err_san_describe;
+		}
 	}
 
-	/* Attempt filename or SAN boot as applicable */
+	/* Allow a root-path-only boot with skip-san enabled to succeed */
+	rc = 0;
+
+	/* Attempt filename boot if applicable */
 	if ( filename ) {
-		if ( ( rc = imgdownload ( image, filename,
-					  register_and_autoexec_image ) ) !=0){
-			printf ( "Could not chain image: %s\n",
+		if ( ( rc = imgdownload ( filename, NULL, NULL,
+					  register_and_boot_image ) ) != 0 ) {
+			printf ( "\nCould not chain image: %s\n",
 				 strerror ( rc ) );
+			/* Fall through to (possibly) attempt a SAN boot
+			 * as a fallback.  If no SAN boot is attempted,
+			 * our status will become the return status.
+			 */
+		} else {
+			/* Always print an extra newline, because we
+			 * don't know where the NBP may have left the
+			 * cursor.
+			 */
+			printf ( "\n" );
 		}
-	} else if ( root_path ) {
+	}
+
+	/* Attempt SAN boot if applicable */
+	if ( ( drive >= 0 ) && ! ( flags & URIBOOT_NO_SAN_BOOT ) ) {
 		if ( fetch_intz_setting ( NULL, &skip_san_boot_setting) == 0 ) {
 			printf ( "Booting from SAN device %#02x\n", drive );
 			rc = san_boot ( drive );
@@ -182,27 +184,23 @@ int uriboot ( struct uri *filename, struct uri *root_path ) {
 		} else {
 			printf ( "Skipping boot from SAN device %#02x\n",
 				 drive );
-			rc = 0;
+			/* Avoid overwriting a possible failure status
+			 * from a filename boot.
+			 */
 		}
-	} else {
-		printf ( "No filename or root path specified\n" );
-		rc = -ENOENT;
 	}
 
  err_san_describe:
 	/* Unhook SAN device, if applicable */
-	if ( drive >= 0 ) {
+	if ( ( drive >= 0 ) && ! ( flags & URIBOOT_NO_SAN_UNHOOK ) ) {
 		if ( fetch_intz_setting ( NULL, &keep_san_setting ) == 0 ) {
-			printf ( "Unregistering SAN device %#02x\n", drive );
 			san_unhook ( drive );
+			printf ( "Unregistered SAN device %#02x\n", drive );
 		} else {
-			printf ( "Preserving connection to SAN device %#02x\n",
-				 drive );
+			printf ( "Preserving SAN device %#02x\n", drive );
 		}
 	}
  err_san_hook:
-	image_put ( image );
- err_alloc_image:
 	return rc;
 }
 
@@ -343,19 +341,51 @@ int netboot ( struct net_device *netdev ) {
 		goto err_pxe_menu_boot;
 	}
 
-	/* Fetch next server, filename and root path */
+	/* Fetch next server and filename */
 	filename = fetch_next_server_and_filename ( NULL );
 	if ( ! filename )
 		goto err_filename;
+	if ( ! uri_has_path ( filename ) ) {
+		/* Ignore empty filename */
+		uri_put ( filename );
+		filename = NULL;
+	}
+
+	/* Fetch root path */
 	root_path = fetch_root_path ( NULL );
 	if ( ! root_path )
 		goto err_root_path;
+	if ( ! uri_is_absolute ( root_path ) ) {
+		/* Ignore empty root path */
+		uri_put ( root_path );
+		root_path = NULL;
+	}
+
+	/* If we have both a filename and a root path, ignore an
+	 * unsupported URI scheme in the root path, since it may
+	 * represent an NFS root.
+	 */
+	if ( filename && root_path &&
+	     ( xfer_uri_opener ( root_path->scheme ) == NULL ) ) {
+		printf ( "Ignoring unsupported root path\n" );
+		uri_put ( root_path );
+		root_path = NULL;
+	}
+
+	/* Check that we have something to boot */
+	if ( ! ( filename || root_path ) ) {
+		rc = -ENOENT_BOOT;
+		printf ( "Nothing to boot: %s\n", strerror ( rc ) );
+		goto err_no_boot;
+	}
 
 	/* Boot using next server, filename and root path */
-	if ( ( rc = uriboot ( filename, root_path ) ) != 0 )
+	if ( ( rc = uriboot ( filename, root_path, san_default_drive(),
+			      ( root_path ? 0 : URIBOOT_NO_SAN ) ) ) != 0 )
 		goto err_uriboot;
 
  err_uriboot:
+ err_no_boot:
 	uri_put ( root_path );
  err_root_path:
 	uri_put ( filename );

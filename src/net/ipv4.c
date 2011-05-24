@@ -23,8 +23,8 @@
 
 FILE_LICENCE ( GPL2_OR_LATER );
 
-/* Unique IP datagram identification number */
-static uint16_t next_ident = 0;
+/* Unique IP datagram identification number (high byte) */
+static uint8_t next_ident_high = 0;
 
 /** List of IPv4 miniroutes */
 struct list_head ipv4_miniroutes = LIST_HEAD_INIT ( ipv4_miniroutes );
@@ -314,7 +314,6 @@ static int ipv4_tx ( struct io_buffer *iobuf,
 	iphdr->verhdrlen = ( IP_VER | ( sizeof ( *iphdr ) / 4 ) );
 	iphdr->service = IP_TOS;
 	iphdr->len = htons ( iob_len ( iobuf ) );	
-	iphdr->ident = htons ( ++next_ident );
 	iphdr->ttl = IP_TTL;
 	iphdr->protocol = tcpip_protocol->tcpip_proto;
 	iphdr->dest = sin_dest->sin_addr;
@@ -334,6 +333,14 @@ static int ipv4_tx ( struct io_buffer *iobuf,
 		rc = -ENETUNREACH;
 		goto err;
 	}
+
+	/* (Ab)use the "ident" field to convey metadata about the
+	 * network device statistics into packet traces.  Useful for
+	 * extracting debug information from non-debug builds.
+	 */
+	iphdr->ident = htons ( ( (++next_ident_high) << 8 ) |
+			       ( ( netdev->rx_stats.bad & 0xf ) << 4 ) |
+			       ( ( netdev->rx_stats.good & 0xf ) << 0 ) );
 
 	/* Determine link-layer destination address */
 	if ( ( rc = ipv4_ll_addr ( next_hop, iphdr->src, netdev,
@@ -554,23 +561,23 @@ struct arp_net_protocol ipv4_arp_protocol __arp_net_protocol = {
  */
 
 /** IPv4 address setting */
-struct setting ip_setting __setting = {
+struct setting ip_setting __setting ( SETTING_IPv4 ) = {
 	.name = "ip",
-	.description = "IPv4 address",
+	.description = "IP address",
 	.tag = DHCP_EB_YIADDR,
 	.type = &setting_type_ipv4,
 };
 
 /** IPv4 subnet mask setting */
-struct setting netmask_setting __setting = {
+struct setting netmask_setting __setting ( SETTING_IPv4 ) = {
 	.name = "netmask",
-	.description = "IPv4 subnet mask",
+	.description = "Subnet mask",
 	.tag = DHCP_SUBNET_MASK,
 	.type = &setting_type_ipv4,
 };
 
 /** Default gateway setting */
-struct setting gateway_setting __setting = {
+struct setting gateway_setting __setting ( SETTING_IPv4 ) = {
 	.name = "gateway",
 	.description = "Default gateway",
 	.tag = DHCP_ROUTERS,

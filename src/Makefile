@@ -45,6 +45,7 @@ ELF2EFI64	:= ./util/elf2efi64
 EFIROM		:= ./util/efirom
 ICCFIX		:= ./util/iccfix
 EINFO		:= ./util/einfo
+GENKEYMAP	:= ./util/genkeymap.pl
 DOXYGEN		:= doxygen
 BINUTILS_DIR	:= /usr
 BFD_DIR		:= $(BINUTILS_DIR)
@@ -74,12 +75,13 @@ SRCDIRS		+= drivers/block
 SRCDIRS		+= drivers/nvs
 SRCDIRS		+= drivers/bitbash
 SRCDIRS		+= drivers/infiniband
-SRCDIRS		+= drivers/linux
-SRCDIRS		+= interface/pxe interface/efi interface/smbios interface/linux
+SRCDIRS		+= interface/pxe interface/efi interface/smbios
+SRCDIRS		+= interface/bofm
 SRCDIRS		+= tests
 SRCDIRS		+= crypto crypto/axtls crypto/matrixssl
 SRCDIRS		+= hci hci/commands hci/tui
 SRCDIRS		+= hci/mucurses hci/mucurses/widgets
+SRCDIRS		+= hci/keymap
 SRCDIRS		+= usr
 SRCDIRS		+= config
 
@@ -99,8 +101,8 @@ INCDIRS		+= include .
 # Default build target: build the most common targets and print out a
 # helpfully suggestive message
 #
-ALL		:= bin/blib.a bin/ipxe.dsk bin/ipxe.iso bin/ipxe.usb \
-		   bin/undionly.kpxe bin/rtl8139.rom
+ALL		:= bin/blib.a bin/ipxe.dsk bin/ipxe.lkrn bin/ipxe.iso \
+		   bin/ipxe.usb bin/undionly.kpxe bin/rtl8139.rom
 all : $(ALL)
 	@$(ECHO) '==========================================================='
 	@$(ECHO)

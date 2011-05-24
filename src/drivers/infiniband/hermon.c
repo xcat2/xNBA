@@ -40,6 +40,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/ethernet.h>
 #include <ipxe/fcoe.h>
 #include <ipxe/vlan.h>
+#include <ipxe/bofm.h>
 #include "hermon.h"
 
 /**
@@ -192,6 +193,7 @@ static int hermon_cmd ( struct hermon *hermon, unsigned long command,
 	if ( in_len && ( command & HERMON_HCR_IN_MBOX ) ) {
 		memset ( hermon->mailbox_in, 0, HERMON_MBOX_SIZE );
 		in_buffer = hermon->mailbox_in;
+		MLX_FILL_H ( &hcr, 0, in_param_h, virt_to_bus ( in_buffer ) );
 		MLX_FILL_1 ( &hcr, 1, in_param_l, virt_to_bus ( in_buffer ) );
 	}
 	memcpy ( in_buffer, in, in_len );
@@ -199,6 +201,8 @@ static int hermon_cmd ( struct hermon *hermon, unsigned long command,
 	out_buffer = &hcr.u.dwords[3];
 	if ( out_len && ( command & HERMON_HCR_OUT_MBOX ) ) {
 		out_buffer = hermon->mailbox_out;
+		MLX_FILL_H ( &hcr, 3, out_param_h,
+			     virt_to_bus ( out_buffer ) );
 		MLX_FILL_1 ( &hcr, 4, out_param_l,
 			     virt_to_bus ( out_buffer ) );
 	}
@@ -497,6 +501,17 @@ hermon_cmd_mgid_hash ( struct hermon *hermon, const union ib_gid *gid,
 }
 
 static inline int
+hermon_cmd_mod_stat_cfg ( struct hermon *hermon, unsigned int mode,
+			  unsigned int input_mod,
+			  struct hermonprm_scalar_parameter *portion ) {
+	return hermon_cmd ( hermon,
+			    HERMON_HCR_INOUT_CMD ( HERMON_HCR_MOD_STAT_CFG,
+						   0, sizeof ( *portion ),
+						   0, sizeof ( *portion ) ),
+			    mode, portion, input_mod, portion );
+}
+
+static inline int
 hermon_cmd_query_port ( struct hermon *hermon, unsigned int port,
 			struct hermonprm_query_port_cap *query_port ) {
 	return hermon_cmd ( hermon,
@@ -509,9 +524,9 @@ static inline int
 hermon_cmd_sense_port ( struct hermon *hermon, unsigned int port,
 			struct hermonprm_sense_port *port_type ) {
 	return hermon_cmd ( hermon,
-                            HERMON_HCR_OUT_CMD ( HERMON_HCR_SENSE_PORT,
-                                                 1, sizeof ( *port_type ) ),
-                            0, NULL, port, port_type );
+			    HERMON_HCR_OUT_CMD ( HERMON_HCR_SENSE_PORT,
+						 0, sizeof ( *port_type ) ),
+			    0, NULL, port, port_type );
 }
 
 static inline int
@@ -640,6 +655,7 @@ static int hermon_alloc_mtt ( struct hermon *hermon,
 		memset ( &write_mtt, 0, sizeof ( write_mtt ) );
 		MLX_FILL_1 ( &write_mtt.mtt_base_addr, 1,
 			     value, mtt_base_addr );
+		MLX_FILL_H ( &write_mtt.mtt, 0, ptag_h, addr );
 		MLX_FILL_2 ( &write_mtt.mtt, 1,
 			     p, 1,
 			     ptag_l, ( addr >> 3 ) );
@@ -680,6 +696,59 @@ static void hermon_free_mtt ( struct hermon *hermon,
 	       ( mtt->mtt_offset + mtt->num_pages - 1 ) );
 	hermon_bitmask_free ( hermon->mtt_inuse, mtt->mtt_offset,
 			      mtt->num_pages );
+}
+
+/***************************************************************************
+ *
+ * Static configuration operations
+ *
+ ***************************************************************************
+ */
+
+/**
+ * Calculate offset within static configuration
+ *
+ * @v field		Field
+ * @ret offset		Offset
+ */
+#define HERMON_MOD_STAT_CFG_OFFSET( field )				     \
+	( ( MLX_BIT_OFFSET ( struct hermonprm_mod_stat_cfg_st, field ) / 8 ) \
+	  & ~( sizeof ( struct hermonprm_scalar_parameter ) - 1 ) )
+
+/**
+ * Query or modify static configuration
+ *
+ * @v hermon		Hermon device
+ * @v port		Port
+ * @v mode		Command mode
+ * @v offset		Offset within static configuration
+ * @v stat_cfg		Static configuration
+ * @ret rc		Return status code
+ */
+static int hermon_mod_stat_cfg ( struct hermon *hermon, unsigned int port,
+				 unsigned int mode, unsigned int offset,
+				 struct hermonprm_mod_stat_cfg *stat_cfg ) {
+	struct hermonprm_scalar_parameter *portion =
+		( ( void * ) &stat_cfg->u.bytes[offset] );
+	struct hermonprm_mod_stat_cfg_input_mod mod;
+	int rc;
+
+	/* Sanity check */
+	assert ( ( offset % sizeof ( *portion ) ) == 0 );
+
+	/* Construct input modifier */
+	memset ( &mod, 0, sizeof ( mod ) );
+	MLX_FILL_2 ( &mod, 0,
+		     portnum, port,
+		     offset, offset );
+
+	/* Issue command */
+	if ( ( rc = hermon_cmd_mod_stat_cfg ( hermon, mode,
+					      be32_to_cpu ( mod.u.dwords[0] ),
+					      portion ) ) != 0 )
+		return rc;
+
+	return 0;
 }
 
 /***************************************************************************
@@ -829,8 +898,12 @@ static int hermon_create_cq ( struct ib_device *ibdev,
 		     usr_page, HERMON_UAR_NON_EQ_PAGE,
 		     log_cq_size, fls ( cq->num_cqes - 1 ) );
 	MLX_FILL_1 ( &cqctx, 5, c_eqn, hermon->eq.eqn );
+	MLX_FILL_H ( &cqctx, 6, mtt_base_addr_h,
+		     hermon_cq->mtt.mtt_base_addr );
 	MLX_FILL_1 ( &cqctx, 7, mtt_base_addr_l,
 		     ( hermon_cq->mtt.mtt_base_addr >> 3 ) );
+	MLX_FILL_H ( &cqctx, 14, db_record_addr_h,
+		     virt_to_phys ( hermon_cq->doorbell ) );
 	MLX_FILL_1 ( &cqctx, 15, db_record_addr_l,
 		     ( virt_to_phys ( hermon_cq->doorbell ) >> 3 ) );
 	if ( ( rc = hermon_cmd_sw2hw_cq ( hermon, cq->cqn, &cqctx ) ) != 0 ) {
@@ -1115,8 +1188,12 @@ static int hermon_create_qp ( struct ib_device *ibdev,
 		     qpc_eec_data.page_offset,
 		     ( hermon_qp->mtt.page_offset >> 6 ) );
 	MLX_FILL_1 ( &qpctx, 41, qpc_eec_data.cqn_rcv, qp->recv.cq->cqn );
+	MLX_FILL_H ( &qpctx, 42, qpc_eec_data.db_record_addr_h,
+		     virt_to_phys ( hermon_qp->recv.doorbell ) );
 	MLX_FILL_1 ( &qpctx, 43, qpc_eec_data.db_record_addr_l,
 		     ( virt_to_phys ( hermon_qp->recv.doorbell ) >> 2 ) );
+	MLX_FILL_H ( &qpctx, 52, qpc_eec_data.mtt_base_addr_h,
+		     hermon_qp->mtt.mtt_base_addr );
 	MLX_FILL_1 ( &qpctx, 53, qpc_eec_data.mtt_base_addr_l,
 		     ( hermon_qp->mtt.mtt_base_addr >> 3 ) );
 	if ( ( rc = hermon_cmd_rst2init_qp ( hermon, qp->qpn,
@@ -1338,6 +1415,8 @@ hermon_fill_ud_send_wqe ( struct ib_device *ibdev,
 	MLX_FILL_1 ( &wqe->ud.ud, 9, q_key, av->qkey );
 	MLX_FILL_1 ( &wqe->ud.data[0], 0, byte_count, iob_len ( iobuf ) );
 	MLX_FILL_1 ( &wqe->ud.data[0], 1, l_key, hermon->lkey );
+	MLX_FILL_H ( &wqe->ud.data[0], 2,
+		     local_address_h, virt_to_bus ( iobuf->data ) );
 	MLX_FILL_1 ( &wqe->ud.data[0], 3,
 		     local_address_l, virt_to_bus ( iobuf->data ) );
 	return HERMON_OPCODE_SEND;
@@ -1381,11 +1460,15 @@ hermon_fill_mlx_send_wqe ( struct ib_device *ibdev,
 	MLX_FILL_1 ( &wqe->mlx.data[0], 0,
 		     byte_count, iob_len ( &headers ) );
 	MLX_FILL_1 ( &wqe->mlx.data[0], 1, l_key, hermon->lkey );
+	MLX_FILL_H ( &wqe->mlx.data[0], 2,
+		     local_address_h, virt_to_bus ( headers.data ) );
 	MLX_FILL_1 ( &wqe->mlx.data[0], 3,
 		     local_address_l, virt_to_bus ( headers.data ) );
 	MLX_FILL_1 ( &wqe->mlx.data[1], 0,
 		     byte_count, ( iob_len ( iobuf ) + 4 /* ICRC */ ) );
 	MLX_FILL_1 ( &wqe->mlx.data[1], 1, l_key, hermon->lkey );
+	MLX_FILL_H ( &wqe->mlx.data[1], 2,
+		     local_address_h, virt_to_bus ( iobuf->data ) );
 	MLX_FILL_1 ( &wqe->mlx.data[1], 3,
 		     local_address_l, virt_to_bus ( iobuf->data ) );
 	return HERMON_OPCODE_SEND;
@@ -1414,6 +1497,8 @@ hermon_fill_rc_send_wqe ( struct ib_device *ibdev,
 	MLX_FILL_1 ( &wqe->rc.ctrl, 2, c, 0x03 /* generate completion */ );
 	MLX_FILL_1 ( &wqe->rc.data[0], 0, byte_count, iob_len ( iobuf ) );
 	MLX_FILL_1 ( &wqe->rc.data[0], 1, l_key, hermon->lkey );
+	MLX_FILL_H ( &wqe->rc.data[0], 2,
+		     local_address_h, virt_to_bus ( iobuf->data ) );
 	MLX_FILL_1 ( &wqe->rc.data[0], 3,
 		     local_address_l, virt_to_bus ( iobuf->data ) );
 	return HERMON_OPCODE_SEND;
@@ -1446,6 +1531,8 @@ hermon_fill_eth_send_wqe ( struct ib_device *ibdev,
 	MLX_FILL_1 ( &wqe->eth.data[0], 0,
 		     byte_count, iob_len ( iobuf ) );
 	MLX_FILL_1 ( &wqe->eth.data[0], 1, l_key, hermon->lkey );
+	MLX_FILL_H ( &wqe->eth.data[0], 2,
+		     local_address_h, virt_to_bus ( iobuf->data ) );
 	MLX_FILL_1 ( &wqe->eth.data[0], 3,
 		     local_address_l, virt_to_bus ( iobuf->data ) );
 	return HERMON_OPCODE_SEND;
@@ -1558,6 +1645,8 @@ static int hermon_post_recv ( struct ib_device *ibdev,
 	/* Construct work queue entry */
 	MLX_FILL_1 ( &wqe->data[0], 0, byte_count, iob_tailroom ( iobuf ) );
 	MLX_FILL_1 ( &wqe->data[0], 1, l_key, hermon->lkey );
+	MLX_FILL_H ( &wqe->data[0], 2,
+		     local_address_h, virt_to_bus ( iobuf->data ) );
 	MLX_FILL_1 ( &wqe->data[0], 3,
 		     local_address_l, virt_to_bus ( iobuf->data ) );
 
@@ -1586,7 +1675,6 @@ static int hermon_complete ( struct ib_device *ibdev,
 	struct hermon *hermon = ib_get_drvdata ( ibdev );
 	struct ib_work_queue *wq;
 	struct ib_queue_pair *qp;
-	struct hermon_queue_pair *hermon_qp;
 	struct io_buffer *iobuf;
 	struct ib_address_vector recv_av;
 	struct ib_global_route_header *grh;
@@ -1621,7 +1709,6 @@ static int hermon_complete ( struct ib_device *ibdev,
 		return -EIO;
 	}
 	qp = wq->qp;
-	hermon_qp = ib_qp_get_drvdata ( qp );
 
 	/* Identify work queue entry */
 	wqe_idx = MLX_GET ( &cqe->normal, wqe_counter );
@@ -1778,10 +1865,14 @@ static int hermon_create_eq ( struct hermon *hermon ) {
 
 	/* Hand queue over to hardware */
 	memset ( &eqctx, 0, sizeof ( eqctx ) );
-	MLX_FILL_1 ( &eqctx, 0, st, 0xa /* "Fired" */ );
+	MLX_FILL_2 ( &eqctx, 0,
+		     st, 0xa /* "Fired" */,
+		     oi, 1 );
 	MLX_FILL_1 ( &eqctx, 2,
 		     page_offset, ( hermon_eq->mtt.page_offset >> 5 ) );
 	MLX_FILL_1 ( &eqctx, 3, log_eq_size, fls ( HERMON_NUM_EQES - 1 ) );
+	MLX_FILL_H ( &eqctx, 6, mtt_base_addr_h,
+		     hermon_eq->mtt.mtt_base_addr );
 	MLX_FILL_1 ( &eqctx, 7, mtt_base_addr_l,
 		     ( hermon_eq->mtt.mtt_base_addr >> 3 ) );
 	if ( ( rc = hermon_cmd_sw2hw_eq ( hermon, hermon_eq->eqn,
@@ -1831,8 +1922,7 @@ static void hermon_destroy_eq ( struct hermon *hermon ) {
 	int rc;
 
 	/* Unmap events from event queue */
-	memset ( &mask, 0, sizeof ( mask ) );
-	MLX_FILL_1 ( &mask, 1, port_state_change, 1 );
+	memset ( &mask, 0xff, sizeof ( mask ) );
 	if ( ( rc = hermon_cmd_map_eq ( hermon,
 					( HERMON_UNMAP_EQ | hermon_eq->eqn ),
 					&mask ) ) != 0 ) {
@@ -1968,17 +2058,20 @@ static int hermon_open ( struct ib_device *ibdev ) {
 
 	/* Set port parameters */
 	memset ( &set_port, 0, sizeof ( set_port ) );
-	MLX_FILL_7 ( &set_port.ib, 0,
+	MLX_FILL_8 ( &set_port.ib, 0,
 		     mmc, 1,
 		     mvc, 1,
 		     mp, 1,
 		     mg, 1,
 		     mtu_cap, IB_MTU_2048,
 		     vl_cap, IB_VL_0,
-		     rcm, 1 );
+		     rcm, 1,
+		     lss, 1 );
 	MLX_FILL_2 ( &set_port.ib, 10,
 		     max_pkey, 1,
 		     max_gid, 1 );
+	MLX_FILL_1 ( &set_port.ib, 28,
+		     link_speed_supported, 1 );
 	if ( ( rc = hermon_cmd_set_port ( hermon, 0, ibdev->port,
 					  &set_port ) ) != 0 ) {
 		DBGC ( hermon, "Hermon %p port %d could not set port: %s\n",
@@ -2743,6 +2836,7 @@ static int hermon_map_vpm ( struct hermon *hermon,
 		memset ( &mapping, 0, sizeof ( mapping ) );
 		MLX_FILL_1 ( &mapping, 0, va_h, ( va >> 32 ) );
 		MLX_FILL_1 ( &mapping, 1, va_l, ( va >> 12 ) );
+		MLX_FILL_H ( &mapping, 2, pa_h, pa );
 		MLX_FILL_2 ( &mapping, 3,
 			     log2size, ( ( fls ( size ) - 1 ) - 12 ),
 			     pa_l, ( pa >> 12 ) );
@@ -2879,6 +2973,11 @@ static int hermon_get_cap ( struct hermon *hermon ) {
 		( 1 << MLX_GET ( &dev_cap, log2_rsvd_cqs ) );
 	hermon->cap.cqc_entry_size = MLX_GET ( &dev_cap, cqc_entry_sz );
 	hermon->cap.reserved_eqs = MLX_GET ( &dev_cap, num_rsvd_eqs );
+	if ( hermon->cap.reserved_eqs == 0 ) {
+		/* Backward compatibility */
+		hermon->cap.reserved_eqs =
+			( 1 << MLX_GET ( &dev_cap, log2_rsvd_eqs ) );
+	}
 	hermon->cap.eqc_entry_size = MLX_GET ( &dev_cap, eqc_entry_sz );
 	hermon->cap.reserved_mtts =
 		( 1 << MLX_GET ( &dev_cap, log2_rsvd_mtts ) );
@@ -3223,6 +3322,103 @@ static void hermon_free_icm ( struct hermon *hermon ) {
 
 /***************************************************************************
  *
+ * BOFM interface
+ *
+ ***************************************************************************
+ */
+
+/**
+ * Harvest Ethernet MAC for BOFM
+ *
+ * @v bofm		BOFM device
+ * @v mport		Multi-port index
+ * @v mac		MAC to fill in
+ * @ret rc		Return status code
+ */
+static int hermon_bofm_harvest ( struct bofm_device *bofm, unsigned int mport,
+				 uint8_t *mac ) {
+	struct hermon *hermon = container_of ( bofm, struct hermon, bofm );
+	struct hermonprm_mod_stat_cfg stat_cfg;
+	union {
+		uint8_t bytes[8];
+		uint32_t dwords[2];
+	} buf;
+	int rc;
+
+	/* Query static configuration */
+	if ( ( rc = hermon_mod_stat_cfg ( hermon, mport,
+					  HERMON_MOD_STAT_CFG_QUERY,
+					  HERMON_MOD_STAT_CFG_OFFSET ( mac_m ),
+					  &stat_cfg ) ) != 0 ) {
+		DBGC ( hermon, "Hermon %p port %d could not query "
+		       "configuration: %s\n", hermon, mport, strerror ( rc ) );
+		return rc;
+	}
+
+	/* Retrieve MAC address */
+	buf.dwords[0] = htonl ( MLX_GET ( &stat_cfg, mac_high ) );
+	buf.dwords[1] = htonl ( MLX_GET ( &stat_cfg, mac_low ) );
+	memcpy ( mac, &buf.bytes[ sizeof ( buf.bytes ) - ETH_ALEN ],
+		 ETH_ALEN );
+
+	DBGC ( hermon, "Hermon %p port %d harvested MAC address %s\n",
+	       hermon, mport, eth_ntoa ( mac ) );
+
+	return 0;
+}
+
+/**
+ * Update Ethernet MAC for BOFM
+ *
+ * @v bofm		BOFM device
+ * @v mport		Multi-port index
+ * @v mac		MAC to fill in
+ * @ret rc		Return status code
+ */
+static int hermon_bofm_update ( struct bofm_device *bofm, unsigned int mport,
+				const uint8_t *mac ) {
+	struct hermon *hermon = container_of ( bofm, struct hermon, bofm );
+	struct hermonprm_mod_stat_cfg stat_cfg;
+	union {
+		uint8_t bytes[8];
+		uint32_t dwords[2];
+	} buf;
+	int rc;
+
+	/* Prepare MAC address */
+	memset ( &buf, 0, sizeof ( buf ) );
+	memcpy ( &buf.bytes[ sizeof ( buf.bytes ) - ETH_ALEN ], mac,
+		 ETH_ALEN );
+
+	/* Modify static configuration */
+	memset ( &stat_cfg, 0, sizeof ( stat_cfg ) );
+	MLX_FILL_2 ( &stat_cfg, 36,
+		     mac_m, 1,
+		     mac_high, ntohl ( buf.dwords[0] ) );
+	MLX_FILL_1 ( &stat_cfg, 37, mac_low, ntohl ( buf.dwords[1] ) );
+	if ( ( rc = hermon_mod_stat_cfg ( hermon, mport,
+					  HERMON_MOD_STAT_CFG_SET,
+					  HERMON_MOD_STAT_CFG_OFFSET ( mac_m ),
+					  &stat_cfg ) ) != 0 ) {
+		DBGC ( hermon, "Hermon %p port %d could not modify "
+		       "configuration: %s\n", hermon, mport, strerror ( rc ) );
+		return rc;
+	}
+
+	DBGC ( hermon, "Hermon %p port %d updated MAC address to %s\n",
+	       hermon, mport, eth_ntoa ( mac ) );
+
+	return 0;
+}
+
+/** Hermon BOFM operations */
+static struct bofm_operations hermon_bofm_operations = {
+	.harvest = hermon_bofm_harvest,
+	.update = hermon_bofm_update,
+};
+
+/***************************************************************************
+ *
  * PCI interface
  *
  ***************************************************************************
@@ -3317,29 +3513,60 @@ static void hermon_reset ( struct hermon *hermon,
 }
 
 /**
- * Probe PCI device
+ * Allocate Hermon device
  *
  * @v pci		PCI device
  * @v id		PCI ID
  * @ret rc		Return status code
  */
-static int hermon_probe ( struct pci_device *pci,
-			  const struct pci_device_id *id __unused ) {
+static struct hermon * hermon_alloc ( void ) {
 	struct hermon *hermon;
-	struct ib_device *ibdev;
-	struct net_device *netdev;
-	struct hermon_port *port;
-	struct hermonprm_init_hca init_hca;
-	unsigned int i;
-	int rc;
 
 	/* Allocate Hermon device */
 	hermon = zalloc ( sizeof ( *hermon ) );
-	if ( ! hermon ) {
-		rc = -ENOMEM;
-		goto err_alloc_hermon;
-	}
-	pci_set_drvdata ( pci, hermon );
+	if ( ! hermon )
+		goto err_hermon;
+
+	/* Allocate space for mailboxes */
+	hermon->mailbox_in = malloc_dma ( HERMON_MBOX_SIZE,
+					  HERMON_MBOX_ALIGN );
+	if ( ! hermon->mailbox_in )
+		goto err_mailbox_in;
+	hermon->mailbox_out = malloc_dma ( HERMON_MBOX_SIZE,
+					   HERMON_MBOX_ALIGN );
+	if ( ! hermon->mailbox_out )
+		goto err_mailbox_out;
+
+	return hermon;
+
+	free_dma ( hermon->mailbox_out, HERMON_MBOX_SIZE );
+ err_mailbox_out:
+	free_dma ( hermon->mailbox_in, HERMON_MBOX_SIZE );
+ err_mailbox_in:
+	free ( hermon );
+ err_hermon:
+	return NULL;
+}
+
+/**
+ * Free Hermon device
+ *
+ * @v hermon		Hermon device
+ */
+static void hermon_free ( struct hermon *hermon ) {
+
+	free_dma ( hermon->mailbox_out, HERMON_MBOX_SIZE );
+	free_dma ( hermon->mailbox_in, HERMON_MBOX_SIZE );
+	free ( hermon );
+}
+
+/**
+ * Initialise Hermon PCI parameters
+ *
+ * @v hermon		Hermon device
+ * @v pci		PCI device
+ */
+static void hermon_pci_init ( struct hermon *hermon, struct pci_device *pci ) {
 
 	/* Fix up PCI device */
 	adjust_pci_device ( pci );
@@ -3349,23 +3576,37 @@ static int hermon_probe ( struct pci_device *pci,
 				   HERMON_PCI_CONFIG_BAR_SIZE );
 	hermon->uar = ioremap ( pci_bar_start ( pci, HERMON_PCI_UAR_BAR ),
 				HERMON_UAR_NON_EQ_PAGE * HERMON_PAGE_SIZE );
+}
+
+/**
+ * Probe PCI device
+ *
+ * @v pci		PCI device
+ * @v id		PCI ID
+ * @ret rc		Return status code
+ */
+static int hermon_probe ( struct pci_device *pci ) {
+	struct hermon *hermon;
+	struct ib_device *ibdev;
+	struct net_device *netdev;
+	struct hermon_port *port;
+	struct hermonprm_init_hca init_hca;
+	unsigned int i;
+	int rc;
+
+	/* Allocate Hermon device */
+	hermon = hermon_alloc();
+	if ( ! hermon ) {
+		rc = -ENOMEM;
+		goto err_alloc;
+	}
+	pci_set_drvdata ( pci, hermon );
+
+	/* Initialise PCI parameters */
+	hermon_pci_init ( hermon, pci );
 
 	/* Reset device */
 	hermon_reset ( hermon, pci );
-
-	/* Allocate space for mailboxes */
-	hermon->mailbox_in = malloc_dma ( HERMON_MBOX_SIZE,
-					  HERMON_MBOX_ALIGN );
-	if ( ! hermon->mailbox_in ) {
-		rc = -ENOMEM;
-		goto err_mailbox_in;
-	}
-	hermon->mailbox_out = malloc_dma ( HERMON_MBOX_SIZE,
-					   HERMON_MBOX_ALIGN );
-	if ( ! hermon->mailbox_out ) {
-		rc = -ENOMEM;
-		goto err_mailbox_out;
-	}
 
 	/* Start firmware */
 	if ( ( rc = hermon_start_firmware ( hermon ) ) != 0 )
@@ -3475,12 +3716,8 @@ static int hermon_probe ( struct pci_device *pci,
  err_get_cap:
 	hermon_stop_firmware ( hermon );
  err_start_firmware:
-	free_dma ( hermon->mailbox_out, HERMON_MBOX_SIZE );
- err_mailbox_out:
-	free_dma ( hermon->mailbox_in, HERMON_MBOX_SIZE );
- err_mailbox_in:
-	free ( hermon );
- err_alloc_hermon:
+	hermon_free ( hermon );
+ err_alloc:
 	return rc;
 }
 
@@ -3502,16 +3739,65 @@ static void hermon_remove ( struct pci_device *pci ) {
 	hermon_cmd_close_hca ( hermon );
 	hermon_free_icm ( hermon );
 	hermon_stop_firmware ( hermon );
-	hermon_stop_firmware ( hermon );
-	free_dma ( hermon->mailbox_out, HERMON_MBOX_SIZE );
-	free_dma ( hermon->mailbox_in, HERMON_MBOX_SIZE );
 	for ( i = ( hermon->cap.num_ports - 1 ) ; i >= 0 ; i-- ) {
 		netdev_nullify ( hermon->port[i].netdev );
 		netdev_put ( hermon->port[i].netdev );
 	}
 	for ( i = ( hermon->cap.num_ports - 1 ) ; i >= 0 ; i-- )
 		ibdev_put ( hermon->port[i].ibdev );
-	free ( hermon );
+	hermon_free ( hermon );
+}
+
+/**
+ * Probe PCI device for BOFM
+ *
+ * @v pci		PCI device
+ * @v id		PCI ID
+ * @ret rc		Return status code
+ */
+static int hermon_bofm_probe ( struct pci_device *pci ) {
+	struct hermon *hermon;
+	int rc;
+
+	/* Allocate Hermon device */
+	hermon = hermon_alloc();
+	if ( ! hermon ) {
+		rc = -ENOMEM;
+		goto err_alloc;
+	}
+	pci_set_drvdata ( pci, hermon );
+
+	/* Initialise PCI parameters */
+	hermon_pci_init ( hermon, pci );
+
+	/* Initialise BOFM device */
+	bofm_init ( &hermon->bofm, pci, &hermon_bofm_operations );
+
+	/* Register BOFM device */
+	if ( ( rc = bofm_register ( &hermon->bofm ) ) != 0 ) {
+		DBGC ( hermon, "Hermon %p could not register BOFM device: "
+		       "%s\n", hermon, strerror ( rc ) );
+		goto err_bofm_register;
+	}
+
+	return 0;
+
+ err_bofm_register:
+	hermon_free ( hermon );
+ err_alloc:
+	return rc;
+}
+
+/**
+ * Remove PCI device for BOFM
+ *
+ * @v pci		PCI device
+ */
+static void hermon_bofm_remove ( struct pci_device *pci ) {
+	struct hermon *hermon = pci_get_drvdata ( pci );
+
+	bofm_unregister ( &hermon->bofm );
+	hermon_free ( hermon );
 }
 
 static struct pci_device_id hermon_nics[] = {
@@ -3534,4 +3820,11 @@ struct pci_driver hermon_driver __pci_driver = {
 	.id_count = ( sizeof ( hermon_nics ) / sizeof ( hermon_nics[0] ) ),
 	.probe = hermon_probe,
 	.remove = hermon_remove,
+};
+
+struct pci_driver hermon_bofm_driver __bofm_driver = {
+	.ids = hermon_nics,
+	.id_count = ( sizeof ( hermon_nics ) / sizeof ( hermon_nics[0] ) ),
+	.probe = hermon_bofm_probe,
+	.remove = hermon_bofm_remove,
 };

@@ -143,6 +143,16 @@ static int process_on_failure ( int rc ) {
 }
 
 /**
+ * Process next command regardless of status from previous command
+ *
+ * @v rc		Status of previous command
+ * @ret process		Process next command
+ */
+static int process_always ( int rc __unused ) {
+	return 1;
+}
+
+/**
  * Find command terminator
  *
  * @v tokens		Token list
@@ -165,6 +175,10 @@ static int command_terminator ( char **tokens,
 		} else if ( strcmp ( tokens[i], "&&" ) == 0 ) {
 			/* Short-circuit logical AND */
 			*process_next = process_on_success;
+			return i;
+		} else if ( strcmp ( tokens[i], ";" ) == 0 ) {
+			/* Process next command unconditionally */
+			*process_next = process_always;
 			return i;
 		}
 	}
@@ -203,6 +217,45 @@ int shell_stopped ( int stop ) {
 }
 
 /**
+ * Expand settings within a token list
+ *
+ * @v argc		Argument count
+ * @v tokens		Token list
+ * @v argv		Argument list to fill in
+ * @ret rc		Return status code
+ */
+static int expand_tokens ( int argc, char **tokens, char **argv ) {
+	int i;
+
+	/* Expand each token in turn */
+	for ( i = 0 ; i < argc ; i++ ) {
+		argv[i] = expand_settings ( tokens[i] );
+		if ( ! argv[i] )
+			goto err_expand_settings;
+	}
+
+	return 0;
+
+ err_expand_settings:
+	assert ( argv[i] == NULL );
+	for ( ; i >= 0 ; i-- )
+		free ( argv[i] );
+	return -ENOMEM;
+}
+
+/**
+ * Free an expanded token list
+ *
+ * @v argv		Argument list
+ */
+static void free_tokens ( char **argv ) {
+
+	/* Free each expanded argument */
+	while ( *argv )
+		free ( *(argv++) );
+}
+
+/**
  * Execute command line
  *
  * @v command		Command line
@@ -211,61 +264,119 @@ int shell_stopped ( int stop ) {
  * Execute the named command and arguments.
  */
 int system ( const char *command ) {
+	int count = split_command ( ( char * ) command, NULL );
+	char *all_tokens[ count + 1 ];
 	int ( * process_next ) ( int rc );
-	char *expcmd;
-	char **argv;
+	char *command_copy;
+	char **tokens;
 	int argc;
-	int count;
 	int process;
 	int rc = 0;
 
-	/* Perform variable expansion */
-	expcmd = expand_settings ( command );
-	if ( ! expcmd )
+	/* Create modifiable copy of command */
+	command_copy = strdup ( command );
+	if ( ! command_copy )
 		return -ENOMEM;
 
-	/* Count tokens */
-	count = split_command ( expcmd, NULL );
+	/* Split command into tokens */
+	split_command ( command_copy, all_tokens );
+	all_tokens[count] = NULL;
 
-	/* Create token array */
-	if ( count ) {
-		char * tokens[count + 1];
-		
-		split_command ( expcmd, tokens );
-		tokens[count] = NULL;
-		process = 1;
+	/* Process individual commands */
+	process = 1;
+	for ( tokens = all_tokens ; ; tokens += ( argc + 1 ) ) {
 
-		for ( argv = tokens ; ; argv += ( argc + 1 ) ) {
+		/* Find command terminator */
+		argc = command_terminator ( tokens, &process_next );
 
-			/* Find command terminator */
-			argc = command_terminator ( argv, &process_next );
+		/* Expand tokens and execute command */
+		if ( process ) {
+			char *argv[ argc + 1 ];
+
+			/* Expand tokens */
+			if ( ( rc = expand_tokens ( argc, tokens, argv ) ) != 0)
+				break;
+			argv[argc] = NULL;
 
 			/* Execute command */
-			if ( process ) {
-				argv[argc] = NULL;
-				rc = execv ( argv[0], argv );
-			}
+			rc = execv ( argv[0], argv );
 
-			/* Stop processing, if applicable */
-			if ( shell_stopped ( SHELL_STOP_COMMAND ) )
-				break;
-
-			/* Stop processing if we have reached the end
-			 * of the command.
-			 */
-			if ( ! process_next )
-				break;
-
-			/* Determine whether or not to process next command */
-			process = process_next ( rc );
+			/* Free tokens */
+			free_tokens ( argv );
 		}
+
+		/* Stop processing, if applicable */
+		if ( shell_stopped ( SHELL_STOP_COMMAND ) )
+			break;
+
+		/* Stop processing if we have reached the end of the
+		 * command.
+		 */
+		if ( ! process_next )
+			break;
+
+		/* Determine whether or not to process next command */
+		process = process_next ( rc );
 	}
 
-	/* Free expanded command */
-	free ( expcmd );
+	/* Free modified copy of command */
+	free ( command_copy );
 
 	return rc;
 }
+
+/**
+ * Concatenate arguments
+ *
+ * @v args		Argument list (NULL-terminated)
+ * @ret string		Concatenated arguments
+ *
+ * The returned string is allocated with malloc().  The caller is
+ * responsible for eventually free()ing this string.
+ */
+char * concat_args ( char **args ) {
+	char **arg;
+	size_t len;
+	char *string;
+	char *ptr;
+
+	/* Calculate total string length */
+	len = 1 /* NUL */;
+	for ( arg = args ; *arg ; arg++ )
+		len += ( 1 /* possible space */ + strlen ( *arg ) );
+
+	/* Allocate string */
+	string = zalloc ( len );
+	if ( ! string )
+		return NULL;
+
+	/* Populate string */
+	ptr = string;
+	for ( arg = args ; *arg ; arg++ ) {
+		ptr += sprintf ( ptr, "%s%s",
+				 ( ( ptr == string ) ? "" : " " ), *arg );
+	}
+	assert ( ptr < ( string + len ) );
+
+	return string;
+}
+
+/** "echo" options */
+struct echo_options {
+	/** Do not print trailing newline */
+	int no_newline;
+};
+
+/** "echo" option list */
+static struct option_descriptor echo_opts[] = {
+	OPTION_DESC ( "n", 'n', no_argument,
+		      struct echo_options, no_newline, parse_flag ),
+};
+
+/** "echo" command descriptor */
+static struct command_descriptor echo_cmd =
+	COMMAND_DESC ( struct echo_options, echo_opts, 0, MAX_ARGUMENTS,
+		       "[-n] [...]" );
 
 /**
  * "echo" command
@@ -275,12 +386,23 @@ int system ( const char *command ) {
  * @ret rc		Return status code
  */
 static int echo_exec ( int argc, char **argv ) {
-	int i;
+	struct echo_options opts;
+	char *text;
+	int rc;
 
-	for ( i = 1 ; i < argc ; i++ ) {
-		printf ( "%s%s", ( ( i == 1 ) ? "" : " " ), argv[i] );
-	}
-	printf ( "\n" );
+	/* Parse options */
+	if ( ( rc = parse_options ( argc, argv, &echo_cmd, &opts ) ) != 0 )
+		return rc;
+
+	/* Parse text */
+	text = concat_args ( &argv[optind] );
+	if ( ! text )
+		return -ENOMEM;
+
+	/* Print text */
+	printf ( "%s%s", text, ( opts.no_newline ? "" : "\n" ) );
+
+	free ( text );
 	return 0;
 }
 
@@ -298,8 +420,7 @@ static struct option_descriptor exit_opts[] = {};
 
 /** "exit" command descriptor */
 static struct command_descriptor exit_cmd =
-	COMMAND_DESC ( struct exit_options, exit_opts, 0, 1,
-		       "[<status>]", "" );
+	COMMAND_DESC ( struct exit_options, exit_opts, 0, 1, "[<status>]" );
 
 /**
  * "exit" command
@@ -343,8 +464,7 @@ static struct option_descriptor isset_opts[] = {};
 
 /** "isset" command descriptor */
 static struct command_descriptor isset_cmd =
-	COMMAND_DESC ( struct isset_options, isset_opts, 0, MAX_ARGUMENTS,
-		       "[...]", "" );
+	COMMAND_DESC ( struct isset_options, isset_opts, 1, 1, "<value>" );
 
 /**
  * "isset" command
@@ -361,12 +481,49 @@ static int isset_exec ( int argc, char **argv ) {
 	if ( ( rc = parse_options ( argc, argv, &isset_cmd, &opts ) ) != 0 )
 		return rc;
 
-	/* Return success iff any arguments exist */
-	return ( ( optind == argc ) ? -ENOENT : 0 );
+	/* Return success iff argument is non-empty */
+	return ( argv[optind][0] ? 0 : -ENOENT );
 }
 
 /** "isset" command */
 struct command isset_command __command = {
 	.name = "isset",
 	.exec = isset_exec,
+};
+
+/** "iseq" options */
+struct iseq_options {};
+
+/** "iseq" option list */
+static struct option_descriptor iseq_opts[] = {};
+
+/** "iseq" command descriptor */
+static struct command_descriptor iseq_cmd =
+	COMMAND_DESC ( struct iseq_options, iseq_opts, 2, 2,
+		       "<value1> <value2>" );
+
+/**
+ * "iseq" command
+ *
+ * @v argc		Argument count
+ * @v argv		Argument list
+ * @ret rc		Return status code
+ */
+static int iseq_exec ( int argc, char **argv ) {
+	struct iseq_options opts;
+	int rc;
+
+	/* Parse options */
+	if ( ( rc = parse_options ( argc, argv, &iseq_cmd, &opts ) ) != 0 )
+		return rc;
+
+	/* Return success iff arguments are equal */
+	return ( ( strcmp ( argv[optind], argv[ optind + 1 ] ) == 0 ) ?
+		 0 : -ERANGE );
+}
+
+/** "iseq" command */
+struct command iseq_command __command = {
+	.name = "iseq",
+	.exec = iseq_exec,
 };

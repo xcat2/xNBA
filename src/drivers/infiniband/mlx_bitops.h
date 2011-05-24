@@ -46,8 +46,8 @@ typedef unsigned char pseudo_bit_t;
 		uint8_t bytes[ sizeof ( struct _structure ## _st ) / 8 ];    \
 		uint32_t dwords[ sizeof ( struct _structure ## _st ) / 32 ]; \
 		struct _structure ## _st *dummy[0];			     \
-	    } u;							     \
-	}
+	    } __attribute__ (( packed )) u;				     \
+	} __attribute__ (( packed ))
 
 /** Get pseudo_bit_t structure type from wrapper structure pointer */
 #define MLX_PSEUDO_STRUCT( _ptr )					     \
@@ -110,6 +110,10 @@ typedef unsigned char pseudo_bit_t;
 	( MLX_ASSEMBLE_1 ( _structure_st, _index, _field, _value ) |	     \
 	  MLX_ASSEMBLE_6 ( _structure_st, _index, __VA_ARGS__ ) )
 
+#define MLX_ASSEMBLE_8( _structure_st, _index, _field, _value, ... )	     \
+	( MLX_ASSEMBLE_1 ( _structure_st, _index, _field, _value ) |	     \
+	  MLX_ASSEMBLE_7 ( _structure_st, _index, __VA_ARGS__ ) )
+
 /*
  * Build native-endian (positive) dword bitmasks from named fields
  *
@@ -142,6 +146,10 @@ typedef unsigned char pseudo_bit_t;
 #define MLX_MASK_7( _structure_st, _index, _field, ... )		     \
 	( MLX_MASK_1 ( _structure_st, _index, _field ) |		     \
 	  MLX_MASK_6 ( _structure_st, _index, __VA_ARGS__ ) )
+
+#define MLX_MASK_8( _structure_st, _index, _field, ... )		     \
+	( MLX_MASK_1 ( _structure_st, _index, _field ) |		     \
+	  MLX_MASK_7 ( _structure_st, _index, __VA_ARGS__ ) )
 
 /*
  * Populate big-endian dwords from named fields and values
@@ -183,6 +191,10 @@ typedef unsigned char pseudo_bit_t;
 	MLX_FILL ( _ptr, _index, MLX_ASSEMBLE_7 ( MLX_PSEUDO_STRUCT ( _ptr ),\
 						  _index, __VA_ARGS__ ) )
 
+#define MLX_FILL_8( _ptr, _index, ... )					     \
+	MLX_FILL ( _ptr, _index, MLX_ASSEMBLE_8 ( MLX_PSEUDO_STRUCT ( _ptr ),\
+						  _index, __VA_ARGS__ ) )
+
 /*
  * Modify big-endian dword using named field and value
  *
@@ -219,5 +231,15 @@ typedef unsigned char pseudo_bit_t;
 		    MLX_BIT_MASK ( MLX_PSEUDO_STRUCT ( _ptr ), _field );     \
 		__value;						     \
 	} )
+
+/*
+ * Fill high dword of physical address, if necessary
+ *
+ */
+#define MLX_FILL_H( _structure_st, _index, _field, _address ) do {	     \
+	if ( sizeof ( physaddr_t ) > sizeof ( uint32_t ) ) {		     \
+		MLX_FILL_1 ( _structure_st, _index, _field,		     \
+			     ( ( ( uint64_t ) (_address) ) >> 32 ) );	     \
+	} } while ( 0 )
 
 #endif /* _MLX_BITOPS_H */

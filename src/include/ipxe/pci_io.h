@@ -43,17 +43,17 @@ FILE_LICENCE ( GPL2_OR_LATER );
 	PROVIDE_SINGLE_API_INLINE ( PCIAPI_PREFIX_ ## _subsys, _api_func )
 
 /* Include all architecture-independent I/O API headers */
-#include <ipxe/efi/efi_pci.h>
+#include <ipxe/efi/efi_pci_api.h>
 
 /* Include all architecture-dependent I/O API headers */
 #include <bits/pci_io.h>
 
 /**
- * Determine maximum PCI bus number within system
+ * Determine number of PCI buses within system
  *
- * @ret max_bus		Maximum bus number
+ * @ret num_bus		Number of buses
  */
-int pci_max_bus ( void );
+int pci_num_bus ( void );
 
 /**
  * Read byte from PCI configuration space

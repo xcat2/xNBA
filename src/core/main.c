@@ -15,17 +15,42 @@ Literature dealing with the network protocols:
 FILE_LICENCE ( GPL2_OR_LATER );
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <ipxe/init.h>
 #include <ipxe/features.h>
 #include <ipxe/shell.h>
-#include <ipxe/shell_banner.h>
 #include <ipxe/image.h>
+#include <ipxe/keys.h>
+#include <usr/prompt.h>
 #include <usr/autoboot.h>
 #include <config/general.h>
 
 #define NORMAL	"\033[0m"
 #define BOLD	"\033[1m"
 #define CYAN	"\033[36m"
+
+/** The "scriptlet" setting */
+struct setting scriptlet_setting __setting ( SETTING_MISC ) = {
+	.name = "scriptlet",
+	.description = "Boot scriptlet",
+	.tag = DHCP_EB_SCRIPTLET,
+	.type = &setting_type_string,
+};
+
+/**
+ * Prompt for shell entry
+ *
+ * @ret	enter_shell		User wants to enter shell
+ */
+static int shell_banner ( void ) {
+
+	/* Skip prompt if timeout is zero */
+	if ( BANNER_TIMEOUT <= 0 )
+		return 0;
+
+	return ( prompt ( "\nPress Ctrl-B for the iPXE command line...",
+			  ( BANNER_TIMEOUT * 100 ), CTRL_B ) == 0 );
+}
 
 /**
  * Main entry point
@@ -35,6 +60,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 __asmcall int main ( void ) {
 	struct feature *feature;
 	struct image *image;
+	char *scriptlet;
 
 	/* Some devices take an unreasonably long time to initialise */
 	printf ( PRODUCT_SHORT_NAME " initialising devices..." );
@@ -62,27 +88,28 @@ __asmcall int main ( void ) {
 		printf ( " %s", feature->name );
 	printf ( "\n" );
 
-	/* Prompt for shell */
-	if ( shell_banner() ) {
+	/* Boot system */
+	if ( ( image = first_image() ) != NULL ) {
+		/* We have an embedded image; execute it */
+		image_exec ( image );
+	} else if ( shell_banner() ) {
 		/* User wants shell; just give them a shell */
 		shell();
 	} else {
-		/* User doesn't want shell; load and execute the first
-		 * image, or autoboot() if we have no images.  If
-		 * booting fails for any reason, offer a second chance
-		 * to enter the shell for diagnostics.
-		 */
-		if ( have_images() ) {
-			for_each_image ( image ) {
-				image_exec ( image );
-				break;
-			}
+		fetch_string_setting_copy ( NULL, &scriptlet_setting,
+					    &scriptlet );
+		if ( scriptlet ) {
+			/* User has defined a scriptlet; execute it */
+			system ( scriptlet );
+			free ( scriptlet );
 		} else {
+			/* Try booting.  If booting fails, offer the
+			 * user another chance to enter the shell.
+			 */
 			autoboot();
+			if ( shell_banner() )
+				shell();
 		}
-
-		if ( shell_banner() )
-			shell();
 	}
 
 	shutdown_exit();

@@ -22,6 +22,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <errno.h>
 #include <byteswap.h>
 #include <ipxe/dhcp.h>
+#include <ipxe/dhcpopts.h>
 #include <ipxe/settings.h>
 #include <ipxe/device.h>
 #include <ipxe/netdevice.h>
@@ -33,16 +34,32 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 /** Network device named settings */
-struct setting mac_setting __setting = {
+struct setting mac_setting __setting ( SETTING_NETDEV ) = {
 	.name = "mac",
 	.description = "MAC address",
 	.type = &setting_type_hex,
+	.tag = NETDEV_SETTING_TAG_MAC,
 };
-struct setting busid_setting __setting = {
+struct setting busid_setting __setting ( SETTING_NETDEV ) = {
 	.name = "busid",
 	.description = "Bus ID",
 	.type = &setting_type_hex,
+	.tag = NETDEV_SETTING_TAG_BUS_ID,
 };
+
+/**
+ * Check applicability of network device setting
+ *
+ * @v settings		Settings block
+ * @v setting		Setting
+ * @ret applies		Setting applies within this settings block
+ */
+static int netdev_applies ( struct settings *settings __unused,
+			    struct setting *setting ) {
+
+	return ( IS_NETDEV_SETTING_TAG ( setting->tag ) ||
+		 dhcpopt_applies ( setting->tag ) );
+}
 
 /**
  * Store value of network device setting
@@ -64,6 +81,8 @@ static int netdev_store ( struct settings *settings, struct setting *setting,
 		memcpy ( netdev->ll_addr, data, len );
 		return 0;
 	}
+	if ( setting_cmp ( setting, &busid_setting ) == 0 )
+		return -ENOTSUP;
 
 	return generic_settings_store ( settings, setting, data, len );
 }
@@ -114,6 +133,7 @@ static void netdev_clear ( struct settings *settings ) {
 
 /** Network device configuration settings operations */
 struct settings_operations netdev_settings_operations = {
+	.applies = netdev_applies,
 	.store = netdev_store,
 	.fetch = netdev_fetch,
 	.clear = netdev_clear,

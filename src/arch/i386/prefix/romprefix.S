@@ -45,6 +45,8 @@ FILE_LICENCE ( GPL2_OR_LATER )
 	.code16
 	.arch i386
 	.section ".prefix", "ax", @progbits
+	.globl	_rom_start
+_rom_start:
 	
 	.org	0x00
 romheader:
@@ -102,6 +104,11 @@ pciheader_runtime_length:
 	.long	0
 	.previous
 
+	/* PnP doesn't require any particular alignment, but IBM
+	 * BIOSes will scan on 16-byte boundaries rather than using
+	 * the offset stored at 0x1a
+	 */
+	.align	16
 pnpheader:
 	.ascii	"$PnP"			/* Signature */
 	.byte	0x01			/* Structure revision */
@@ -284,6 +291,7 @@ pnp_scan:
 	call	print_message
 	jmp	pnp_done
 no_pnp:	/* Not PnP-compliant - hook INT 19 */
+#ifdef NONPNP_HOOK_INT19
 	movw	$init_message_int19, %si
 	xorw	%di, %di
 	call	print_message
@@ -294,6 +302,7 @@ no_pnp:	/* Not PnP-compliant - hook INT 19 */
 	pushw	%gs /* %gs contains runtime %cs */
 	pushw	$int19_entry
 	popl	%es:( 0x19 * 4 )
+#endif /* NONPNP_HOOK_INT19 */
 pnp_done:
 
 	/* Check for PMM */
@@ -318,7 +327,8 @@ pmm_scan:
 	/* We have PMM and so a 1kB stack: preserve whole registers */
 	pushal
 	/* Allocate image source PMM block */
-	movzwl	image_source_len_pgh, %ecx
+	movzwl	image_source_size, %ecx
+	shll	$5, %ecx
 	movl	$PMM_HANDLE_BASE_IMAGE_SOURCE, %ebx
 	movw	$get_pmm_image_source, %bp
 	call	get_pmm
@@ -563,16 +573,16 @@ image_source:
 	.long	0
 	.size	image_source, . - image_source
 
-/* Image source area length (in paragraphs)
+/* Image source size (in 512-byte sectors)
  *
  */
-image_source_len_pgh:
+image_source_size:
 	.word	0
-	.size	image_source_len_pgh, . - image_source_len_pgh
+	.size	image_source_size, . - image_source_size
 	.section ".zinfo.fixup", "a", @progbits	/* Compressor fixups */
 	.ascii	"ADDW"
-	.long	image_source_len_pgh
-	.long	16
+	.long	image_source_size
+	.long	512
 	.long	0
 	.previous
 

@@ -34,11 +34,11 @@ FILE_LICENCE ( GPL2_OR_LATER );
  * @v where	Location within PCI configuration space
  */
 void pcidirect_prepare ( struct pci_device *pci, int where ) {
-	outl ( ( 0x80000000 | ( pci->bus << 16 ) | ( pci->devfn << 8 ) |
-		 ( where & ~3 ) ), PCIDIRECT_CONFIG_ADDRESS );
+	outl ( ( 0x80000000 | ( pci->busdevfn << 8 ) | ( where & ~3 ) ),
+	       PCIDIRECT_CONFIG_ADDRESS );
 }
 
-PROVIDE_PCIAPI_INLINE ( direct, pci_max_bus );
+PROVIDE_PCIAPI_INLINE ( direct, pci_num_bus );
 PROVIDE_PCIAPI_INLINE ( direct, pci_read_config_byte );
 PROVIDE_PCIAPI_INLINE ( direct, pci_read_config_word );
 PROVIDE_PCIAPI_INLINE ( direct, pci_read_config_dword );

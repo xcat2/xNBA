@@ -22,7 +22,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
-#include <console.h>
+#include <ipxe/console.h>
 #include <ipxe/netdevice.h>
 #include <ipxe/device.h>
 #include <ipxe/process.h>
@@ -87,9 +87,10 @@ static void ifstat_errors ( struct net_device_stats *stats,
  * @v netdev		Network device
  */
 void ifstat ( struct net_device *netdev ) {
-	printf ( "%s: %s on %s (%s)\n"
+	printf ( "%s: %s using %s on %s (%s)\n"
 		 "  [Link:%s, TX:%d TXE:%d RX:%d RXE:%d]\n",
-		 netdev->name, netdev_addr ( netdev ), netdev->dev->name,
+		 netdev->name, netdev_addr ( netdev ),
+		 netdev->dev->driver_name, netdev->dev->name,
 		 ( netdev_is_open ( netdev ) ? "open" : "closed" ),
 		 ( netdev_link_ok ( netdev ) ? "up" : "down" ),
 		 netdev->tx_stats.good, netdev->tx_stats.bad,

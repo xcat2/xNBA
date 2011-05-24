@@ -1,5 +1,5 @@
-#ifndef CONSOLE_H
-#define CONSOLE_H
+#ifndef _IPXE_CONSOLE_H
+#define _IPXE_CONSOLE_H
 
 #include <ipxe/tables.h>
 
@@ -102,8 +102,7 @@ struct console_driver {
 
 extern void putchar ( int character );
 extern int getchar ( void );
-extern int getchar_timeout ( unsigned long timeout );
 extern int iskey ( void );
-extern int getkey ( void );
+extern int getkey ( unsigned long timeout );
 
-#endif /* CONSOLE_H */
+#endif /* _IPXE_CONSOLE_H */

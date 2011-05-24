@@ -49,6 +49,8 @@ FILE_LICENCE ( GPL_ANY )
 	.arch i386
 	.org	0
 	.section ".prefix", "ax", @progbits
+	.globl	_lkrn_start
+_lkrn_start:
 /* 
 	This is a minimal boot sector.	If anyone tries to execute it (e.g., if
 	a .lilo file is dd'ed to a floppy), print an error message. 
@@ -191,6 +193,9 @@ run_ipxe:
 	movw	%ax, %ss
 	movw	$0x7c00, %sp
 
+	/* Retrieve command-line pointer */
+	movl	%es:cmd_line_ptr, %edx
+
 	/* Install iPXE */
 	call	install
 
@@ -204,6 +209,13 @@ run_ipxe:
 	lret
 	.section ".text16", "awx", @progbits
 1:
+	/* Set up %ds for access to .data16 */
+	movw	%bx, %ds
+
+	/* Store command-line pointer */
+	movl	%edx, cmdline_phys
+
+	/* Run iPXE */
 	pushl	$main
 	pushw	%cs
 	call	prot_call

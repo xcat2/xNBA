@@ -873,14 +873,12 @@ static void e1000e_close ( struct net_device *netdev )
 	struct e1000_adapter *adapter = netdev_priv ( netdev );
 	struct e1000_hw *hw = &adapter->hw;
 	uint32_t rctl;
-	uint32_t icr;
 
 	DBGP ( "e1000_close\n" );
 
-	/* Acknowledge interrupts */
-	icr = E1000_READ_REG ( hw, E1000_ICR );
-
+	/* Disable and acknowledge interrupts */
 	e1000e_irq_disable ( adapter );
+	E1000_READ_REG ( hw, E1000_ICR );
 
 	/* disable receives */
 	rctl = E1000_READ_REG ( hw, E1000_RCTL );
@@ -1005,8 +1003,7 @@ static struct net_device_operations e1000e_operations;
  *
  * @ret rc	Return status code
  **/
-int e1000e_probe ( struct pci_device *pdev,
-	      const struct pci_device_id *ent)
+int e1000e_probe ( struct pci_device *pdev )
 {
 	int i, err;
 	struct net_device *netdev;
@@ -1014,7 +1011,7 @@ int e1000e_probe ( struct pci_device *pdev,
 	unsigned long mmio_start, mmio_len;
 	unsigned long flash_start, flash_len;
 	struct e1000_hw *hw;
-	const struct e1000_info *ei = e1000_info_tbl[ent->driver_data];
+	const struct e1000_info *ei = e1000_info_tbl[pdev->id->driver_data];
 
 	DBGP ( "e1000_probe\n" );
 

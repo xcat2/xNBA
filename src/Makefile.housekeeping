@@ -88,26 +88,39 @@ cctype:
 #
 # Check for tools that can cause failed builds
 #
-.toolcheck :
-	@if $(CC) -v 2>&1 | grep -is 'gcc version 2\.96' > /dev/null; then \
-		$(ECHO) 'gcc 2.96 is unsuitable for compiling Etherboot'; \
-		$(ECHO) 'Use gcc 2.95 or gcc 3.x instead'; \
-		exit 1; \
-	fi
-	@if [ `perl -e 'use bytes; print chr(255)' | wc -c` = 2 ]; then \
-		$(ECHO) 'Your Perl version has a Unicode handling bug'; \
-		$(ECHO) 'Execute this command before compiling Etherboot:'; \
-		$(ECHO) 'export LANG=$${LANG%.UTF-8}'; \
-		exit 1; \
-	fi
-	@$(TOUCH) $@
-MAKEDEPS	+= .toolcheck
-VERYCLEANUP	+= .toolcheck
+
+ifeq ($(CCTYPE),gcc)
+GCC_2_96_BANNER := $(shell $(CC) -v 2>&1 | grep -is 'gcc version 2\.96')
+ifneq ($(GCC_2_96_BANNER),)
+$(warning gcc 2.96 is unsuitable for compiling iPXE)
+$(warning Use gcc 2.95 or a newer version instead)
+$(error Unsuitable build environment found)
+endif
+endif
+
+PERL_UNICODE_CHECK := $(shell $(PERL) -e 'use bytes; print chr(255)' | wc -c)
+ifeq ($(PERL_UNICODE_CHECK),2)
+$(warning Your Perl version has a Unicode handling bug)
+$(warning Execute this command before building iPXE:)
+$(warning export LANG=$${LANG%.UTF-8})
+$(error Unsuitable build environment found)
+endif
+
+LD_GOLD_BANNER := $(shell $(LD) -v 2>&1 | grep 'GNU gold')
+ifneq ($(LD_GOLD_BANNER),)
+$(warning GNU gold is unsuitable for building iPXE)
+$(warning Use GNU ld instead)
+$(error Unsuitable build environment found)
+endif
 
 ###############################################################################
 #
 # Check for various tool workarounds
 #
+
+WORKAROUND_CFLAGS :=
+WORKAROUND_ASFLAGS :=
+WORKAROUND_LDFLAGS :=
 
 # Make syntax does not allow use of comma or space in certain places.
 # This ugly workaround is suggested in the manual.
@@ -119,7 +132,7 @@ SPACE	:= $(EMPTY) $(EMPTY)
 # Check for an old version of gas (binutils 2.9.1)
 #
 OLDGAS	:= $(shell $(AS) --version | grep -q '2\.9\.1' && $(ECHO) -DGAS291)
-CFLAGS	+= $(OLDGAS)
+WORKAROUND_CFLAGS += $(OLDGAS)
 oldgas :
 	@$(ECHO) $(oldgas)
 
@@ -131,7 +144,18 @@ ifeq ($(CCTYPE),gcc)
 SP_TEST = $(CC) -fno-stack-protector -x c -c /dev/null \
 		-o /dev/null >/dev/null 2>&1
 SP_FLAGS := $(shell $(SP_TEST) && $(ECHO) '-fno-stack-protector')
-CFLAGS	+= $(SP_FLAGS)
+WORKAROUND_CFLAGS += $(SP_FLAGS)
+endif
+
+# Some widespread patched versions of gcc include -fPIE -Wl,-pie by
+# default.  Note that gcc will exit *successfully* if it fails to
+# recognise an option that starts with "no", so we have to test for
+# output on stderr instead of checking the exit status.
+#
+ifeq ($(CCTYPE),gcc)
+PIE_TEST = [ -z "`$(CC) -fno-PIE -nopie -x c -c /dev/null -o /dev/null 2>&1`" ]
+PIE_FLAGS := $(shell $(PIE_TEST) && $(ECHO) '-fno-PIE -nopie')
+WORKAROUND_CFLAGS += $(PIE_FLAGS)
 endif
 
 # gcc 4.4 generates .eh_frame sections by default, which distort the
@@ -141,7 +165,16 @@ ifeq ($(CCTYPE),gcc)
 CFI_TEST = $(CC) -fno-dwarf2-cfi-asm -x c -c /dev/null \
 		 -o /dev/null >/dev/null 2>&1
 CFI_FLAGS := $(shell $(CFI_TEST) && $(ECHO) '-fno-dwarf2-cfi-asm')
-CFLAGS	+= $(CFI_FLAGS)
+WORKAROUND_CFLAGS += $(CFI_FLAGS)
+endif
+
+# gcc 4.6 generates spurious warnings if -Waddress is in force.
+# Inhibit this.
+#
+ifeq ($(CCTYPE),gcc)
+WNA_TEST = $(CC) -Wno-address -x c -c /dev/null -o /dev/null >/dev/null 2>&1
+WNA_FLAGS := $(shell $(WNA_TEST) && $(ECHO) '-Wno-address')
+WORKAROUND_CFLAGS += $(WNA_FLAGS)
 endif
 
 # Some versions of gas choke on division operators, treating them as
@@ -150,7 +183,7 @@ endif
 #
 DIVIDE_TEST = $(AS) --divide /dev/null -o /dev/null 2>/dev/null
 DIVIDE_FLAGS := $(shell $(DIVIDE_TEST) && $(ECHO) '--divide')
-ASFLAGS	+= $(DIVIDE_FLAGS)
+WORKAROUND_ASFLAGS += $(DIVIDE_FLAGS)
 
 ###############################################################################
 #
@@ -375,9 +408,9 @@ CFLAGS		+= -diag-disable 1419 # Missing prototypes
 CFLAGS		+= -diag-disable 1599 # Hidden variables
 CFLAGS		+= -Wall -Wmissing-declarations
 endif
-CFLAGS		+= $(EXTRA_CFLAGS)
-ASFLAGS		+= $(EXTRA_ASFLAGS)
-LDFLAGS		+= $(EXTRA_LDFLAGS)
+CFLAGS		+= $(WORKAROUND_CFLAGS) $(EXTRA_CFLAGS)
+ASFLAGS		+= $(WORKAROUND_ASFLAGS) $(EXTRA_ASFLAGS)
+LDFLAGS		+= $(WORKAROUND_LDFLAGS) $(EXTRA_LDFLAGS)
 
 # Inhibit -Werror if NO_WERROR is specified on make command line
 #
@@ -414,6 +447,19 @@ CFLAGS		+= -Wno-uninitialized
 CFLAGS		+= -finstrument-functions
 CFLAGS		+= -finstrument-functions-exclude-file-list=core/fnrec.c
 endif
+
+# Enable per-item sections and section garbage collection.  Note that
+# some older versions of gcc support -fdata-sections but treat it as
+# implying -fno-common, which would break our build.
+#
+ifeq ($(CCTYPE),gcc)
+DS_TEST		= $(ECHO) 'char x;' | \
+		  $(CC) -fdata-sections -S -x c - -o - 2>/dev/null | \
+		  grep -E '\.comm' > /dev/null
+DS_FLAGS	:= $(shell $(DS_TEST) && $(ECHO) '-fdata-sections')
+CFLAGS		+= -ffunction-sections $(DS_FLAGS)
+endif
+LDFLAGS		+= --gc-sections
 
 # compiler.h is needed for our linking and debugging system
 #
@@ -457,6 +503,7 @@ RULE_c_to_s	= $(Q)$(COMPILE_c) -S -g0 -c $< -o $@
 PREPROCESS_S	= $(CPP) $(CFLAGS) $(CFLAGS_S) $(OBJ_CFLAGS)
 ASSEMBLE_S	= $(AS) $(ASFLAGS)
 RULE_S		= $(Q)$(PREPROCESS_S) $< | $(ASSEMBLE_S) -o $@
+RULE_S_to_dbg%.o = $(Q)$(PREPROCESS_S) -Ddebug_$(subst -,_,$(OBJECT))=$* $< | $(ASSEMBLE_S) -o $@
 RULE_S_to_s	= $(Q)$(PREPROCESS_S) $< > $@
 
 DEBUG_TARGETS	+= dbg%.o c s
@@ -502,7 +549,8 @@ define rules_template
 		    '\n$(TGT)_OBJS += $$(BIN)/$(3).$(TGT)\n' ) ) \
 		 '\n$(BIN)/deps/$(1).d : $$($(3)_DEPS)\n' \
 		 '\nTAGS : $$($(3)_DEPS)\n' > $(BIN)/rules/$(1).r
-	@$(PERL) $(PARSEROM) $(1) >> $(BIN)/rules/$(1).r
+	@$(if $(findstring drivers/,$(1)),\
+	   $(PERL) $(PARSEROM) $(1) >> $(BIN)/rules/$(1).r)
 endef
 
 # Rule to generate the dependency list file
@@ -553,21 +601,22 @@ roms :
 # This is needed in order to correctly rebuild embedded.o whenever the
 # list of objects changes.
 #
+EMBED		:= $(EMBEDDED_IMAGE) # Maintain backwards compatibility
 EMBEDDED_LIST	:= $(BIN)/.embedded.list
 ifeq ($(wildcard $(EMBEDDED_LIST)),)
-EMBEDDED_IMAGE_OLD := <invalid>
+EMBED_OLD := <invalid>
 else
-EMBEDDED_IMAGE_OLD := $(shell cat $(EMBEDDED_LIST))
+EMBED_OLD := $(shell cat $(EMBEDDED_LIST))
 endif
-ifneq ($(EMBEDDED_IMAGE_OLD),$(EMBEDDED_IMAGE))
-$(shell $(ECHO) "$(EMBEDDED_IMAGE)" > $(EMBEDDED_LIST))
+ifneq ($(EMBED_OLD),$(EMBED))
+$(shell $(ECHO) "$(EMBED)" > $(EMBEDDED_LIST))
 endif
 
 $(EMBEDDED_LIST) :
 
 VERYCLEANUP	+= $(EMBEDDED_LIST)
 
-EMBEDDED_FILES	:= $(subst $(COMMA), ,$(EMBEDDED_IMAGE))
+EMBEDDED_FILES	:= $(subst $(COMMA), ,$(EMBED))
 EMBED_ALL	:= $(foreach i,$(call seq,1,$(words $(EMBEDDED_FILES))),\
 		     EMBED ( $(i), \"$(word $(i), $(EMBEDDED_FILES))\",\
 			     \"$(notdir $(word $(i),$(EMBEDDED_FILES)))\" ))
@@ -593,6 +642,7 @@ EINFOS		:= $(patsubst $(BIN)/%.o,$(BIN)/%.einfo,$(BOBJS))
 $(BIN)/errors : $(EINFOS) $(EINFO)
 	$(QM)$(ECHO) "  [EINFO] $@"
 	$(Q)$(EINFO) $(EINFOS) | sort > $@
+CLEANUP		+= $(BIN)/errors	# Doesn't match the $(BIN)/*.* pattern
 
 # Generate the NIC file from the parsed source files.  The NIC file is
 # only for rom-o-matic.
@@ -643,9 +693,9 @@ TGT_PCI_DEVICE	= $(PCI_DEVICE_$(TGT_ROM_NAME))
 #		   ROM header (e.g."pci_vendor_id=0x1186 pci_device_id=0x1300")
 #
 TGT_LD_DRIVERS	= $(subst -,_,$(patsubst %,obj_%,$(TGT_DRIVERS)))
-TGT_LD_PREFIX	= obj_$(TGT_PREFIX)prefix
 TGT_LD_IDS	= pci_vendor_id=$(firstword $(TGT_PCI_VENDOR) 0) \
 		  pci_device_id=$(firstword $(TGT_PCI_DEVICE) 0)
+TGT_LD_ENTRY	= _$(TGT_PREFIX)_start
 
 # Calculate linker flags based on link-time options for the current
 # target type (e.g. "bin/dfe538--prism2_pci.zrom.tmp") and derive the
@@ -655,10 +705,10 @@ TGT_LD_IDS	= pci_vendor_id=$(firstword $(TGT_PCI_VENDOR) 0) \
 #		 "-u obj_zpciprefix -u obj_rtl8139 -u obj_prism2_pci
 #		  --defsym pci_vendor=0x1186 --defsym pci_device=0x1300")
 #
-TGT_LD_FLAGS	= $(foreach SYM,$(TGT_LD_PREFIX) $(TGT_LD_DRIVERS) obj_config,\
+TGT_LD_FLAGS	= $(foreach SYM,$(TGT_LD_ENTRY) $(TGT_LD_DRIVERS) obj_config,\
 		    -u $(SYM) --defsym check_$(SYM)=$(SYM) ) \
 		  $(patsubst %,--defsym %,$(TGT_LD_IDS)) \
-		  $(TGT_LD_FLAGS_PRE)
+		  -e $(TGT_LD_ENTRY)
 
 # Calculate list of debugging versions of objects to be included in
 # the target.
@@ -685,8 +735,8 @@ $(BIN)/%.info :
 	@$(ECHO) 'PCI device           : $(TGT_PCI_DEVICE)'
 	@$(ECHO)
 	@$(ECHO) 'LD driver symbols    : $(TGT_LD_DRIVERS)'
-	@$(ECHO) 'LD prefix symbols    : $(TGT_LD_PREFIX)'
 	@$(ECHO) 'LD ID symbols        : $(TGT_LD_IDS)'
+	@$(ECHO) 'LD entry point       : $(TGT_LD_ENTRY)'
 	@$(ECHO)
 	@$(ECHO) 'LD target flags      : $(TGT_LD_FLAGS)'
 	@$(ECHO)
@@ -888,8 +938,8 @@ BOBJS += $(patsubst payload/%.img,$(BIN)/%.o,$(wildcard payload/*.img))
 
 # The "allXXXs" targets for each suffix
 #
-allall: allroms allzroms allpxes allisos alldsks
-allroms allzroms : all%s : $(foreach ROM,$(ROMS),$(BIN)/$(ROM).%)
+allall: allroms allmroms allpxes allisos alldsks
+allroms allmroms : all%s : $(foreach ROM,$(ROMS),$(BIN)/$(ROM).%)
 allpxes allisos alldsks : all%s : $(foreach DRIVER,$(DRIVERS),$(BIN)/$(DRIVER).%)
 
 # Alias for ipxe.%
@@ -1070,6 +1120,21 @@ docview :
 	fi
 
 endif # defined(BIN)
+
+###############################################################################
+#
+# Keyboard maps
+#
+
+hci/keymap/keymap_%.c :
+	$(Q)$(PERL) $(GENKEYMAP) $* > $@
+
+###############################################################################
+#
+# Force deletion of incomplete targets
+#
+
+.DELETE_ON_ERROR :
 
 ###############################################################################
 #

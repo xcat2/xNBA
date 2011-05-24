@@ -32,15 +32,18 @@ FILE_LICENCE ( GPL2_OR_LATER );
 
 /** @file
  *
- * Executable/loadable images
+ * Executable images
  *
  */
 
 /** List of registered images */
 struct list_head images = LIST_HEAD_INIT ( images );
 
+/** Currently-executing image */
+struct image *current_image;
+
 /**
- * Free executable/loadable image
+ * Free executable image
  *
  * @v refcnt		Reference counter
  */
@@ -52,13 +55,13 @@ static void free_image ( struct refcnt *refcnt ) {
 	ufree ( image->data );
 	image_put ( image->replacement );
 	free ( image );
-	DBGC ( image, "IMAGE %p freed\n", image );
+	DBGC ( image, "IMAGE %s freed\n", image->name );
 }
 
 /**
- * Allocate executable/loadable image
+ * Allocate executable image
  *
- * @ret image		Executable/loadable image
+ * @ret image		Executable image
  */
 struct image * alloc_image ( void ) {
 	struct image *image;
@@ -75,12 +78,11 @@ struct image * alloc_image ( void ) {
  *
  * @v image		Image
  * @v URI		New image URI
- * @ret rc		Return status code
  *
  * If no name is set, the name will be updated to the base name of the
  * URI path (if any).
  */
-int image_set_uri ( struct image *image, struct uri *uri ) {
+void image_set_uri ( struct image *image, struct uri *uri ) {
 	const char *path = uri->path;
 
 	/* Replace URI reference */
@@ -90,29 +92,31 @@ int image_set_uri ( struct image *image, struct uri *uri ) {
 	/* Set name if none already specified */
 	if ( path && ( ! image->name[0] ) )
 		image_set_name ( image, basename ( ( char * ) path ) );
-
-	return 0;
 }
 
 /**
  * Set image command line
  *
  * @v image		Image
- * @v cmdline		New image command line
+ * @v cmdline		New image command line, or NULL
  * @ret rc		Return status code
  */
 int image_set_cmdline ( struct image *image, const char *cmdline ) {
+
 	free ( image->cmdline );
-	image->cmdline = strdup ( cmdline );
-	if ( ! image->cmdline )
-		return -ENOMEM;
+	image->cmdline = NULL;
+	if ( cmdline ) {
+		image->cmdline = strdup ( cmdline );
+		if ( ! image->cmdline )
+			return -ENOMEM;
+	}
 	return 0;
 }
 
 /**
- * Register executable/loadable image
+ * Register executable image
  *
- * @v image		Executable/loadable image
+ * @v image		Executable image
  * @ret rc		Return status code
  */
 int register_image ( struct image *image ) {
@@ -124,24 +128,33 @@ int register_image ( struct image *image ) {
 			   imgindex++ );
 	}
 
+	/* Avoid ending up with multiple "selected" images on
+	 * re-registration
+	 */
+	if ( image_find_selected() )
+		image->flags &= ~IMAGE_SELECTED;
+
 	/* Add to image list */
 	image_get ( image );
+	image->flags |= IMAGE_REGISTERED;
 	list_add_tail ( &image->list, &images );
-	DBGC ( image, "IMAGE %p at [%lx,%lx) registered as %s\n",
-	       image, user_to_phys ( image->data, 0 ),
-	       user_to_phys ( image->data, image->len ), image->name );
+	DBGC ( image, "IMAGE %s at [%lx,%lx) registered\n",
+	       image->name, user_to_phys ( image->data, 0 ),
+	       user_to_phys ( image->data, image->len ) );
 
 	return 0;
 }
 
 /**
- * Unregister executable/loadable image
+ * Unregister executable image
  *
- * @v image		Executable/loadable image
+ * @v image		Executable image
  */
 void unregister_image ( struct image *image ) {
-	DBGC ( image, "IMAGE %p unregistered\n", image );
+
+	DBGC ( image, "IMAGE %s unregistered\n", image->name );
 	list_del ( &image->list );
+	image->flags &= ~IMAGE_REGISTERED;
 	image_put ( image );
 }
 
@@ -149,7 +162,7 @@ void unregister_image ( struct image *image ) {
  * Find image by name
  *
  * @v name		Image name
- * @ret image		Executable/loadable image, or NULL
+ * @ret image		Executable image, or NULL
  */
 struct image * find_image ( const char *name ) {
 	struct image *image;
@@ -163,119 +176,92 @@ struct image * find_image ( const char *name ) {
 }
 
 /**
- * Load executable/loadable image into memory
+ * Determine image type
  *
- * @v image		Executable/loadable image
- * @v type		Executable/loadable image type
+ * @v image		Executable image
  * @ret rc		Return status code
  */
-static int image_load_type ( struct image *image, struct image_type *type ) {
-	int rc;
-
-	/* Check image is actually loadable */
-	if ( ! type->load )
-		return -ENOEXEC;
-
-	/* Try the image loader */
-	if ( ( rc = type->load ( image ) ) != 0 ) {
-		DBGC ( image, "IMAGE %p could not load as %s: %s\n",
-		       image, type->name, strerror ( rc ) );
-		return rc;
-	}
-
-	/* Flag as loaded */
-	image->flags |= IMAGE_LOADED;
-	return 0;
-}
-
-/**
- * Load executable/loadable image into memory
- *
- * @v image		Executable/loadable image
- * @ret rc		Return status code
- */
-int image_load ( struct image *image ) {
-
-	assert ( image->type != NULL );
-
-	return image_load_type ( image, image->type );
-}
-
-/**
- * Autodetect image type and load executable/loadable image into memory
- *
- * @v image		Executable/loadable image
- * @ret rc		Return status code
- */
-int image_autoload ( struct image *image ) {
+int image_probe ( struct image *image ) {
 	struct image_type *type;
 	int rc;
 
-	/* If image already has a type, use it */
+	/* Succeed if we already have a type */
 	if ( image->type )
-		return image_load ( image );
+		return 0;
 
-	/* Otherwise probe for a suitable type */
+	/* Try each type in turn */
 	for_each_table_entry ( type, IMAGE_TYPES ) {
-		DBGC ( image, "IMAGE %p trying type %s\n", image, type->name );
-		rc = image_load_type ( image, type );
-		if ( image->type == NULL )
-			continue;
-		return rc;
+		if ( ( rc = type->probe ( image ) ) == 0 ) {
+			image->type = type;
+			DBGC ( image, "IMAGE %s is %s\n",
+			       image->name, type->name );
+			return 0;
+		}
+		DBGC ( image, "IMAGE %s is not %s: %s\n", image->name,
+		       type->name, strerror ( rc ) );
 	}
 
-	DBGC ( image, "IMAGE %p format not recognised\n", image );
+	DBGC ( image, "IMAGE %s format not recognised\n", image->name );
 	return -ENOEXEC;
 }
 
 /**
- * Execute loaded image
+ * Execute image
  *
- * @v image		Loaded image
+ * @v image		Executable image
  * @ret rc		Return status code
+ *
+ * The image must already be registered.  Note that executing an image
+ * may cause it to unregister itself.  The caller must therefore
+ * assume that the image pointer becomes invalid.
  */
 int image_exec ( struct image *image ) {
+	struct image *saved_current_image;
 	struct image *replacement;
 	struct uri *old_cwuri;
 	int rc;
 
-	/* Image must be loaded first */
-	if ( ! ( image->flags & IMAGE_LOADED ) ) {
-		DBGC ( image, "IMAGE %p could not execute: not loaded\n",
-		       image );
-		return -ENOTTY;
-	}
+	/* Sanity check */
+	assert ( image->flags & IMAGE_REGISTERED );
 
-	assert ( image->type != NULL );
-
-	/* Check that image is actually executable */
-	if ( ! image->type->exec )
-		return -ENOEXEC;
+	/* Check that this image can be executed */
+	if ( ( rc = image_probe ( image ) ) != 0 )
+		return rc;
 
 	/* Switch current working directory to be that of the image itself */
 	old_cwuri = uri_get ( cwuri );
 	churi ( image->uri );
 
+	/* Preserve record of any currently-running image */
+	saved_current_image = current_image;
+
 	/* Take out a temporary reference to the image.  This allows
 	 * the image to unregister itself if necessary, without
 	 * automatically freeing itself.
 	 */
-	image_get ( image );
+	current_image = image_get ( image );
 
 	/* Try executing the image */
 	if ( ( rc = image->type->exec ( image ) ) != 0 ) {
-		DBGC ( image, "IMAGE %p could not execute: %s\n",
-		       image, strerror ( rc ) );
+		DBGC ( image, "IMAGE %s could not execute: %s\n",
+		       image->name, strerror ( rc ) );
 		/* Do not return yet; we still have clean-up to do */
 	}
 
 	/* Pick up replacement image before we drop the original
-	 * image's temporary reference.
+	 * image's temporary reference.  The replacement image must
+	 * already be registered, so we don't need to hold a temporary
+	 * reference (which would complicate the tail-recursion).
 	 */
 	replacement = image->replacement;
+	if ( replacement )
+		assert ( replacement->flags & IMAGE_REGISTERED );
 
 	/* Drop temporary reference to the original image */
 	image_put ( image );
+
+	/* Restore previous currently-running image */
+	current_image = saved_current_image;
 
 	/* Reset current working directory */
 	churi ( old_cwuri );
@@ -283,8 +269,8 @@ int image_exec ( struct image *image ) {
 
 	/* Tail-recurse into replacement image, if one exists */
 	if ( replacement ) {
-		DBGC ( image, "IMAGE %p replacing self with IMAGE %p\n",
-		       image, replacement );
+		DBGC ( image, "IMAGE %s replacing self with IMAGE %s\n",
+		       image->name, replacement->name );
 		if ( ( rc = image_exec ( replacement ) ) != 0 )
 			return rc;
 	}
@@ -293,37 +279,75 @@ int image_exec ( struct image *image ) {
 }
 
 /**
- * Register and autoload an image
+ * Set replacement image
  *
- * @v image		Image
+ * @v replacement	Replacement image
  * @ret rc		Return status code
+ *
+ * The replacement image must already be registered, and must remain
+ * registered until the currently-executing image returns.
  */
-int register_and_autoload_image ( struct image *image ) {
+int image_replace ( struct image *replacement ) {
+	struct image *image = current_image;
 	int rc;
 
-	if ( ( rc = register_image ( image ) ) != 0 )
-		return rc;
+	/* Sanity check */
+	assert ( replacement->flags & IMAGE_REGISTERED );
 
-	if ( ( rc = image_autoload ( image ) ) != 0 )
+	/* Fail unless there is a currently-executing image */
+	if ( ! image ) {
+		rc = -ENOTTY;
+		DBGC ( replacement, "IMAGE %s cannot replace non-existent "
+		       "image: %s\n", replacement->name, strerror ( rc ) );
 		return rc;
+	}
+
+	/* Clear any existing replacement */
+	image_put ( image->replacement );
+
+	/* Set replacement */
+	image->replacement = image_get ( replacement );
+	DBGC ( image, "IMAGE %s will replace self with IMAGE %s\n",
+	       image->name, replacement->name );
 
 	return 0;
 }
 
 /**
- * Register and autoexec an image
+ * Select image for execution
  *
- * @v image		Image
+ * @v image		Executable image
  * @ret rc		Return status code
  */
-int register_and_autoexec_image ( struct image *image ) {
+int image_select ( struct image *image ) {
+	struct image *tmp;
 	int rc;
 
-	if ( ( rc = register_and_autoload_image ( image ) ) != 0 )
+	/* Unselect all other images */
+	for_each_image ( tmp )
+		tmp->flags &= ~IMAGE_SELECTED;
+
+	/* Check that this image can be executed */
+	if ( ( rc = image_probe ( image ) ) != 0 )
 		return rc;
 
-	if ( ( rc = image_exec ( image ) ) != 0 )
-		return rc;
+	/* Mark image as selected */
+	image->flags |= IMAGE_SELECTED;
 
 	return 0;
+}
+
+/**
+ * Find selected image
+ *
+ * @ret image		Executable image, or NULL
+ */
+struct image * image_find_selected ( void ) {
+	struct image *image;
+
+	for_each_image ( image ) {
+		if ( image->flags & IMAGE_SELECTED )
+			return image;
+	}
+	return NULL;
 }

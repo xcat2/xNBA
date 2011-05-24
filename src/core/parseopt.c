@@ -40,6 +40,17 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define EINFO_ECANCELED_NO_OP \
 	__einfo_uniqify ( EINFO_ECANCELED, 0x01, "Nothing to do" )
 
+/* Disambiguate the various error codes */
+#define EINVAL_INTEGER __einfo_error ( EINFO_EINVAL_INTEGER )
+#define EINFO_EINVAL_INTEGER \
+	__einfo_uniqify ( EINFO_EINVAL, 0x01, "Invalid integer value" )
+#define EINVAL_UNKNOWN_OPTION __einfo_error ( EINFO_EINVAL_UNKNOWN_OPTION )
+#define EINFO_EINVAL_UNKNOWN_OPTION \
+	__einfo_uniqify ( EINFO_EINVAL, 0x02, "Unrecognised option" )
+#define EINVAL_MISSING_ARGUMENT __einfo_error ( EINFO_EINVAL_MISSING_ARGUMENT )
+#define EINFO_EINVAL_MISSING_ARGUMENT \
+	__einfo_uniqify ( EINFO_EINVAL, 0x03, "Missing argument" )
+
 /**
 * Parse string value
  *
@@ -75,7 +86,7 @@ int parse_integer ( const char *text, unsigned int *value ) {
 	*value = strtoul ( text, &endp, 0 );
 	if ( *endp ) {
 		printf ( "\"%s\": invalid integer value\n", text );
-		return -EINVAL;
+		return -EINVAL_INTEGER;
 	}
 
 	return 0;
@@ -126,26 +137,42 @@ int parse_image ( const char *text, struct image **image ) {
 }
 
 /**
+ * Parse flag
+ *
+ * @v text		Text (ignored)
+ * @ret flag		Flag to set
+ * @ret rc		Return status code
+ */
+int parse_flag ( const char *text __unused, int *flag ) {
+
+	/* Set flag */
+	*flag = 1;
+
+	return 0;
+}
+
+/**
  * Print command usage message
  *
  * @v cmd		Command descriptor
  * @v argv		Argument list
  */
 void print_usage ( struct command_descriptor *cmd, char **argv ) {
-	printf ( "Usage:\n\n  %s %s\n", argv[0], cmd->usage_description );
+	printf ( "Usage:\n\n  %s %s\n\nSee http://ipxe.org/cmd/%s for further "
+		 "information\n", argv[0], cmd->usage, argv[0] );
 }
 
 /**
- * Parse command-line options
+ * Reparse command-line options
  *
  * @v argc		Argument count
  * @v argv		Argument list
  * @v cmd		Command descriptor
- * @v opts		Options
+ * @v opts		Options (already initialised with default values)
  * @ret rc		Return status code
  */
-int parse_options ( int argc, char **argv, struct command_descriptor *cmd,
-		    void *opts ) {
+int reparse_options ( int argc, char **argv, struct command_descriptor *cmd,
+		      void *opts ) {
 	struct option longopts[ cmd->num_options + 1 /* help */ + 1 /* end */ ];
 	char shortopts[ cmd->num_options * 3 /* possible "::" */ + 1 /* "h" */
 			+ 1 /* NUL */ ];
@@ -177,9 +204,6 @@ int parse_options ( int argc, char **argv, struct command_descriptor *cmd,
 	DBGC ( cmd,  "Command \"%s\" has options \"%s\", %d-%d args, len %d\n",
 	       argv[0], shortopts, cmd->min_args, cmd->max_args, cmd->len );
 
-	/* Clear options */
-	memset ( opts, 0, cmd->len );
-
 	/* Parse options */
 	while ( ( c = getopt_long ( argc, argv, shortopts, longopts,
 				    NULL ) ) >= 0 ) {
@@ -189,10 +213,13 @@ int parse_options ( int argc, char **argv, struct command_descriptor *cmd,
 			print_usage ( cmd, argv );
 			return -ECANCELED_NO_OP;
 		case '?' :
+			/* Print usage message */
+			print_usage ( cmd, argv );
+			return -EINVAL_UNKNOWN_OPTION;
 		case ':' :
 			/* Print usage message */
 			print_usage ( cmd, argv );
-			return -EINVAL;
+			return -EINVAL_MISSING_ARGUMENT;
 		default:
 			/* Search for an option to parse */
 			for ( i = 0 ; i < cmd->num_options ; i++ ) {
@@ -216,4 +243,22 @@ int parse_options ( int argc, char **argv, struct command_descriptor *cmd,
 	}
 
 	return 0;
+}
+
+/**
+ * Parse command-line options
+ *
+ * @v argc		Argument count
+ * @v argv		Argument list
+ * @v cmd		Command descriptor
+ * @v opts		Options (may be uninitialised)
+ * @ret rc		Return status code
+ */
+int parse_options ( int argc, char **argv, struct command_descriptor *cmd,
+		    void *opts ) {
+
+	/* Clear options */
+	memset ( opts, 0, cmd->len );
+
+	return reparse_options ( argc, argv, cmd, opts );
 }

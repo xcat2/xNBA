@@ -230,6 +230,27 @@ struct generic_settings generic_settings_root = {
 /** Root settings block */
 #define settings_root generic_settings_root.settings
 
+/** Autovivified settings block */
+struct autovivified_settings {
+	/** Reference count */
+	struct refcnt refcnt;
+	/** Generic settings block */
+	struct generic_settings generic;
+};
+
+/**
+ * Free autovivified settings block
+ *
+ * @v refcnt		Reference count
+ */
+static void autovivified_settings_free ( struct refcnt *refcnt ) {
+	struct autovivified_settings *autovivified =
+		container_of ( refcnt, struct autovivified_settings, refcnt );
+
+	generic_settings_clear ( &autovivified->generic.settings );
+	free ( autovivified );
+}
+
 /**
  * Find child named settings block
  *
@@ -264,7 +285,7 @@ static struct settings * find_child_settings ( struct settings *parent,
 static struct settings * autovivify_child_settings ( struct settings *parent,
 						     const char *name ) {
 	struct {
-		struct generic_settings generic;
+		struct autovivified_settings autovivified;
 		char name[ strlen ( name ) + 1 /* NUL */ ];
 	} *new_child;
 	struct settings *settings;
@@ -281,29 +302,30 @@ static struct settings * autovivify_child_settings ( struct settings *parent,
 		return NULL;
 	}
 	memcpy ( new_child->name, name, sizeof ( new_child->name ) );
-	generic_settings_init ( &new_child->generic, NULL );
-	settings = &new_child->generic.settings;
+	ref_init ( &new_child->autovivified.refcnt,
+		   autovivified_settings_free );
+	generic_settings_init ( &new_child->autovivified.generic,
+				&new_child->autovivified.refcnt );
+	settings = &new_child->autovivified.generic.settings;
 	register_settings ( settings, parent, new_child->name );
 	return settings;
 }
 
 /**
- * Return settings block name (for debug only)
+ * Return settings block name
  *
  * @v settings		Settings block
  * @ret name		Settings block name
  */
-static const char * settings_name ( struct settings *settings ) {
-	static char buf[64];
+const char * settings_name ( struct settings *settings ) {
+	static char buf[16];
 	char tmp[ sizeof ( buf ) ];
-	int count;
 
-	for ( count = 0 ; settings ; settings = settings->parent ) {
+	for ( buf[2] = buf[0] = 0 ; settings ; settings = settings->parent ) {
 		memcpy ( tmp, buf, sizeof ( tmp ) );
-		snprintf ( buf, sizeof ( buf ), "%s%c%s", settings->name,
-			   ( count++ ? '.' : '\0' ), tmp );
+		snprintf ( buf, sizeof ( buf ), ".%s%s", settings->name, tmp );
 	}
-	return ( buf + 1 );
+	return ( buf + 2 );
 }
 
 /**
@@ -493,6 +515,19 @@ void unregister_settings ( struct settings *settings ) {
  */
 
 /**
+ * Check applicability of setting
+ *
+ * @v settings		Settings block
+ * @v setting		Setting
+ * @ret applies		Setting applies within this settings block
+ */
+int setting_applies ( struct settings *settings, struct setting *setting ) {
+
+	return ( settings->op->applies ?
+		 settings->op->applies ( settings, setting ) : 1 );
+}
+
+/**
  * Store value of setting
  *
  * @v settings		Settings block, or NULL
@@ -508,6 +543,10 @@ int store_setting ( struct settings *settings, struct setting *setting,
 	/* NULL settings implies storing into the global settings root */
 	if ( ! settings )
 		settings = &settings_root;
+
+	/* Fail if tag does not apply to this settings block */
+	if ( ! setting_applies ( settings, setting ) )
+		return -ENOTTY;
 
 	/* Sanity check */
 	if ( ! settings->op->store )
@@ -537,6 +576,58 @@ int store_setting ( struct settings *settings, struct setting *setting,
 }
 
 /**
+ * Fetch value and origin of setting
+ *
+ * @v settings		Settings block, or NULL to search all blocks
+ * @v setting		Setting to fetch
+ * @v origin		Origin of setting to fill in
+ * @v data		Buffer to fill with setting data
+ * @v len		Length of buffer
+ * @ret len		Length of setting data, or negative error
+ *
+ * The actual length of the setting will be returned even if
+ * the buffer was too small.
+ */
+static int fetch_setting_and_origin ( struct settings *settings,
+				      struct setting *setting,
+				      struct settings **origin,
+				      void *data, size_t len ) {
+	struct settings *child;
+	int ret;
+
+	/* Avoid returning uninitialised data on error */
+	memset ( data, 0, len );
+	if ( origin )
+		*origin = NULL;
+
+	/* NULL settings implies starting at the global settings root */
+	if ( ! settings )
+		settings = &settings_root;
+
+	/* Sanity check */
+	if ( ! settings->op->fetch )
+		return -ENOTSUP;
+
+	/* Try this block first, if applicable */
+	if ( setting_applies ( settings, setting ) &&
+	     ( ( ret = settings->op->fetch ( settings, setting,
+					     data, len ) ) >= 0 ) ) {
+		if ( origin )
+			*origin = settings;
+		return ret;
+	}
+
+	/* Recurse into each child block in turn */
+	list_for_each_entry ( child, &settings->children, siblings ) {
+		if ( ( ret = fetch_setting_and_origin ( child, setting, origin,
+							data, len ) ) >= 0 )
+			return ret;
+	}
+
+	return -ENOENT;
+}
+
+/**
  * Fetch value of setting
  *
  * @v settings		Settings block, or NULL to search all blocks
@@ -550,33 +641,25 @@ int store_setting ( struct settings *settings, struct setting *setting,
  */
 int fetch_setting ( struct settings *settings, struct setting *setting,
 		    void *data, size_t len ) {
-	struct settings *child;
-	int ret;
+	return fetch_setting_and_origin ( settings, setting, NULL, data, len );
+}
 
-	/* Avoid returning uninitialised data on error */
-	memset ( data, 0, len );
+/**
+ * Fetch origin of setting
+ *
+ * @v settings		Settings block, or NULL to search all blocks
+ * @v setting		Setting to fetch
+ * @ret origin		Origin of setting, or NULL if not found
+ *
+ * This function can also be used as an existence check for the
+ * setting.
+ */
+struct settings * fetch_setting_origin ( struct settings *settings,
+					 struct setting *setting ) {
+	struct settings *origin;
 
-	/* NULL settings implies starting at the global settings root */
-	if ( ! settings )
-		settings = &settings_root;
-
-	/* Sanity check */
-	if ( ! settings->op->fetch )
-		return -ENOTSUP;
-
-	/* Try this block first */
-	if ( ( ret = settings->op->fetch ( settings, setting,
-					   data, len ) ) >= 0 )
-		return ret;
-
-	/* Recurse into each child block in turn */
-	list_for_each_entry ( child, &settings->children, siblings ) {
-		if ( ( ret = fetch_setting ( child, setting,
-					     data, len ) ) >= 0 )
-			return ret;
-	}
-
-	return -ENOENT;
+	fetch_setting_and_origin ( settings, setting, &origin, NULL, 0 );
+	return origin;
 }
 
 /**
@@ -625,6 +708,11 @@ int fetch_string_setting ( struct settings *settings, struct setting *setting,
  * The returned length will be the length of the underlying setting
  * data.  The caller is responsible for eventually freeing the
  * allocated buffer.
+ *
+ * To allow the caller to distinguish between a non-existent setting
+ * and an error in allocating memory for the copy, this function will
+ * return success (and a NULL buffer pointer) for a non-existent
+ * setting.
  */
 int fetch_string_setting_copy ( struct settings *settings,
 				struct setting *setting,
@@ -632,14 +720,20 @@ int fetch_string_setting_copy ( struct settings *settings,
 	int len;
 	int check_len = 0;
 
+	/* Avoid returning uninitialised data on error */
+	*data = NULL;
+
+	/* Fetch setting length, and return success if non-existent */
 	len = fetch_setting_len ( settings, setting );
 	if ( len < 0 )
-		return len;
+		return 0;
 
+	/* Allocate string buffer */
 	*data = malloc ( len + 1 );
 	if ( ! *data )
 		return -ENOMEM;
 
+	/* Fetch setting */
 	check_len = fetch_string_setting ( settings, setting, *data,
 					   ( len + 1 ) );
 	assert ( check_len == len );
@@ -875,17 +969,19 @@ struct setting * find_setting ( const char *name ) {
 /**
  * Parse setting name as tag number
  *
+ * @v settings		Settings block
  * @v name		Name
  * @ret tag		Tag number, or 0 if not a valid number
  */
-static unsigned int parse_setting_tag ( const char *name ) {
+static unsigned int parse_setting_tag ( struct settings *settings,
+					const char *name ) {
 	char *tmp = ( ( char * ) name );
 	unsigned int tag = 0;
 
 	while ( 1 ) {
 		tag = ( ( tag << 8 ) | strtoul ( tmp, &tmp, 0 ) );
 		if ( *tmp == 0 )
-			return tag;
+			return ( tag | settings->tag_magic );
 		if ( *tmp != '.' )
 			return 0;
 		tmp++;
@@ -965,15 +1061,14 @@ parse_setting_name ( const char *name,
 	}
 
 	/* Identify setting */
-	if ( ( named_setting = find_setting ( setting_name ) ) != NULL ) {
+	setting->tag = parse_setting_tag ( *settings, setting_name );
+	setting->name = setting_name;
+	for_each_table_entry ( named_setting, SETTINGS ) {
 		/* Matches a defined named setting; use that setting */
-		memcpy ( setting, named_setting, sizeof ( *setting ) );
-	} else if ( ( setting->tag = parse_setting_tag ( setting_name ) ) !=0){
-		/* Is a valid numeric tag; use the tag */
-		setting->tag |= (*settings)->tag_magic;
-	} else {
-		/* Use the arbitrary name */
-		setting->name = setting_name;
+		if ( setting_cmp ( named_setting, setting ) == 0 ) {
+			memcpy ( setting, named_setting, sizeof ( *setting ) );
+			break;
+		}
 	}
 
 	/* Identify setting type, if specified */
@@ -990,6 +1085,27 @@ parse_setting_name ( const char *name,
 }
 
 /**
+ * Return full setting name
+ *
+ * @v settings		Settings block, or NULL
+ * @v setting		Setting
+ * @v buf		Buffer
+ * @v len		Length of buffer
+ * @ret len		Length of setting name, or negative error
+ */
+int setting_name ( struct settings *settings, struct setting *setting,
+		   char *buf, size_t len ) {
+	const char *name;
+
+	if ( ! settings )
+		settings = &settings_root;
+
+	name = settings_name ( settings );
+	return snprintf ( buf, len, "%s%s%s:%s", name, ( name[0] ? "/" : "" ),
+			  setting->name, setting->type->name );
+}
+
+/**
  * Parse and store value of named setting
  *
  * @v name		Name of setting
@@ -1002,30 +1118,54 @@ int storef_named_setting ( const char *name, const char *value ) {
 	char tmp_name[ strlen ( name ) + 1 ];
 	int rc;
 
+	/* Parse setting name */
 	if ( ( rc = parse_setting_name ( name, autovivify_child_settings,
 					 &settings, &setting, tmp_name )) != 0)
 		return rc;
-	return storef_setting ( settings, &setting, value );
+
+	/* Store setting */
+	if ( ( rc = storef_setting ( settings, &setting, value ) ) != 0 )
+		return rc;
+
+	return 0;
 }
 
 /**
  * Fetch and format value of named setting
  *
  * @v name		Name of setting
- * @v buf		Buffer to contain formatted value
- * @v len		Length of buffer
+ * @v name_buf		Buffer to contain canonicalised name
+ * @v name_len		Length of canonicalised name buffer
+ * @v value_buf		Buffer to contain formatted value
+ * @v value_len		Length of formatted value buffer
  * @ret len		Length of formatted value, or negative error
  */
-int fetchf_named_setting ( const char *name, char *buf, size_t len ) {
+int fetchf_named_setting ( const char *name,
+			   char *name_buf, size_t name_len,
+			   char *value_buf, size_t value_len ) {
 	struct settings *settings;
 	struct setting setting;
+	struct settings *origin;
 	char tmp_name[ strlen ( name ) + 1 ];
+	int len;
 	int rc;
 
+	/* Parse setting name */
 	if ( ( rc = parse_setting_name ( name, find_child_settings,
 					 &settings, &setting, tmp_name )) != 0)
 		return rc;
-	return fetchf_setting ( settings, &setting, buf, len );
+
+	/* Fetch setting */
+	if ( ( len = fetchf_setting ( settings, &setting, value_buf,
+				     value_len ) ) < 0 )
+		return len;
+
+	/* Construct setting name */
+	origin = fetch_setting_origin ( settings, &setting );
+	assert ( origin != NULL );
+	setting_name ( origin, &setting, name_buf, name_len );
+
+	return len;
 }
 
 /******************************************************************************
@@ -1523,7 +1663,7 @@ char * expand_settings ( const char *string ) {
 		tail = ( end + 1 );
 
 		/* Determine setting length */
-		setting_len = fetchf_named_setting ( name, NULL, 0 );
+		setting_len = fetchf_named_setting ( name, NULL, 0, NULL, 0 );
 		if ( setting_len < 0 )
 			setting_len = 0; /* Treat error as empty setting */
 
@@ -1532,7 +1672,7 @@ char * expand_settings ( const char *string ) {
 			char setting_buf[ setting_len + 1 ];
 
 			setting_buf[0] = '\0';
-			fetchf_named_setting ( name, setting_buf,
+			fetchf_named_setting ( name, NULL, 0, setting_buf,
 					       sizeof ( setting_buf ) );
 
 			/* Construct expanded string and discard old string */
@@ -1556,7 +1696,7 @@ char * expand_settings ( const char *string ) {
  */
 
 /** Hostname setting */
-struct setting hostname_setting __setting = {
+struct setting hostname_setting __setting ( SETTING_HOST ) = {
 	.name = "hostname",
 	.description = "Host name",
 	.tag = DHCP_HOST_NAME,
@@ -1564,7 +1704,7 @@ struct setting hostname_setting __setting = {
 };
 
 /** Filename setting */
-struct setting filename_setting __setting = {
+struct setting filename_setting __setting ( SETTING_BOOT ) = {
 	.name = "filename",
 	.description = "Boot filename",
 	.tag = DHCP_BOOTFILE_NAME,
@@ -1572,15 +1712,15 @@ struct setting filename_setting __setting = {
 };
 
 /** Root path setting */
-struct setting root_path_setting __setting = {
+struct setting root_path_setting __setting ( SETTING_SANBOOT ) = {
 	.name = "root-path",
-	.description = "iSCSI root path",
+	.description = "SAN root path",
 	.tag = DHCP_ROOT_PATH,
 	.type = &setting_type_string,
 };
 
 /** Username setting */
-struct setting username_setting __setting = {
+struct setting username_setting __setting ( SETTING_AUTH ) = {
 	.name = "username",
 	.description = "User name",
 	.tag = DHCP_EB_USERNAME,
@@ -1588,7 +1728,7 @@ struct setting username_setting __setting = {
 };
 
 /** Password setting */
-struct setting password_setting __setting = {
+struct setting password_setting __setting ( SETTING_AUTH ) = {
 	.name = "password",
 	.description = "Password",
 	.tag = DHCP_EB_PASSWORD,
@@ -1596,9 +1736,9 @@ struct setting password_setting __setting = {
 };
 
 /** Priority setting */
-struct setting priority_setting __setting = {
+struct setting priority_setting __setting ( SETTING_MISC ) = {
 	.name = "priority",
-	.description = "Priority of these settings",
+	.description = "Settings priority",
 	.tag = DHCP_EB_PRIORITY,
 	.type = &setting_type_int8,
 };

@@ -167,8 +167,7 @@ static struct net_device_operations ifec_operations = {
  * This function is called very early on, while iPXE is initializing.
  * This is a iPXE PCI Device Driver API function.
  */
-static int ifec_pci_probe ( struct pci_device *pci,
-                            const struct pci_device_id *id __unused )
+static int ifec_pci_probe ( struct pci_device *pci )
 {
 	struct net_device *netdev;
 	struct ifec_private *priv;
@@ -809,7 +808,7 @@ static void ifec_rx_process ( struct net_device *netdev )
 		       cur_rx );
 		DBGIO_HD ( (void*)rfd->packet, 0x30 );
 
-		if ( ( status & RFD_STATUS ) != RFD_OK ) {
+		if ( ( status & ( RFD_STATUS & ~RFDShort ) ) != RFD_OK ) {
 			DBG ( "Corrupted packet received. "
 			      "Status = %#08hx\n", status );
 			netdev_rx_err ( netdev, iob, -EINVAL );

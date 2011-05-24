@@ -19,7 +19,7 @@
 FILE_LICENCE ( GPL2_OR_LATER );
 
 #include <ctype.h>
-#include <console.h>
+#include <ipxe/console.h>
 #include <ipxe/process.h>
 #include <ipxe/keys.h>
 #include <ipxe/timer.h>
@@ -35,13 +35,13 @@ FILE_LICENCE ( GPL2_OR_LATER );
 /**
  * Read character from console if available within timeout period
  *
- * @v timeout		Timeout period, in ticks
+ * @v timeout		Timeout period, in ticks (0=indefinite)
  * @ret character	Character read from console
  */
-int getchar_timeout ( unsigned long timeout ) {
-	unsigned long expiry = ( currticks() + timeout );
+static int getchar_timeout ( unsigned long timeout ) {
+	unsigned long start = currticks();
 
-	while ( currticks() < expiry ) {
+	while ( ( timeout == 0 ) || ( ( currticks() - start ) < timeout ) ) {
 		step();
 		if ( iskey() )
 			return getchar();
@@ -53,6 +53,7 @@ int getchar_timeout ( unsigned long timeout ) {
 /**
  * Get single keypress
  *
+ * @v timeout		Timeout period, in ticks (0=indefinite)
  * @ret key		Key pressed
  *
  * The returned key will be an ASCII value or a KEY_XXX special
@@ -60,11 +61,11 @@ int getchar_timeout ( unsigned long timeout ) {
  * will return "special" keys (e.g. cursor keys) as a series of
  * characters forming an ANSI escape sequence.
  */
-int getkey ( void ) {
+int getkey ( unsigned long timeout ) {
 	int character;
 	unsigned int n = 0;
 
-	character = getchar();
+	character = getchar_timeout ( timeout );
 	if ( character != ESC )
 		return character;
 

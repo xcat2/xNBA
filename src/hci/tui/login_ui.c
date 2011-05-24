@@ -27,7 +27,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <string.h>
 #include <errno.h>
 #include <curses.h>
-#include <console.h>
+#include <ipxe/console.h>
 #include <ipxe/settings.h>
 #include <ipxe/editbox.h>
 #include <ipxe/keys.h>
@@ -88,7 +88,7 @@ int login_ui ( void ) {
 
 		draw_editbox ( current_box );
 
-		key = getkey();
+		key = getkey ( 0 );
 		switch ( key ) {
 		case KEY_DOWN:
 			current_box = &password_box;

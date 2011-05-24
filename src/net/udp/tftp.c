@@ -1215,7 +1215,7 @@ struct uri_opener mtftp_uri_opener __uri_opener = {
  */
 
 /** TFTP server setting */
-struct setting next_server_setting __setting = {
+struct setting next_server_setting __setting ( SETTING_BOOT ) = {
 	.name = "next-server",
 	.description = "TFTP server",
 	.tag = DHCP_EB_SIADDR,
@@ -1245,11 +1245,15 @@ static int tftp_apply_settings ( void ) {
 	 * applicators.
 	 */
 	if ( tftp_server.s_addr != last_tftp_server.s_addr ) {
-		snprintf ( uri_string, sizeof ( uri_string ),
-			   "tftp://%s/", inet_ntoa ( tftp_server ) );
-		uri = parse_uri ( uri_string );
-		if ( ! uri )
-			return -ENOMEM;
+		if ( tftp_server.s_addr ) {
+			snprintf ( uri_string, sizeof ( uri_string ),
+				   "tftp://%s/", inet_ntoa ( tftp_server ) );
+			uri = parse_uri ( uri_string );
+			if ( ! uri )
+				return -ENOMEM;
+		} else {
+			uri = NULL;
+		}
 		churi ( uri );
 		uri_put ( uri );
 	}

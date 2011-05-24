@@ -35,15 +35,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/parseopt.h>
 #include <ipxe/image.h>
 #include <ipxe/shell.h>
-
-struct image_type script_image_type __image_type ( PROBE_NORMAL );
-
-/** Currently running script
- *
- * This is a global in order to allow goto_exec() to update the
- * offset.
- */
-static struct image *script;
+#include <usr/prompt.h>
+#include <ipxe/script.h>
 
 /** Offset within current script
  *
@@ -55,11 +48,13 @@ static size_t script_offset;
 /**
  * Process script lines
  *
+ * @v image		Script
  * @v process_line	Line processor
  * @v terminate		Termination check
  * @ret rc		Return status code
  */
-static int process_script ( int ( * process_line ) ( const char *line ),
+static int process_script ( struct image *image,
+			    int ( * process_line ) ( const char *line ),
 			    int ( * terminate ) ( int rc ) ) {
 	off_t eol;
 	size_t len;
@@ -70,17 +65,17 @@ static int process_script ( int ( * process_line ) ( const char *line ),
 	do {
 	
 		/* Find length of next line, excluding any terminating '\n' */
-		eol = memchr_user ( script->data, script_offset, '\n',
-				    ( script->len - script_offset ) );
+		eol = memchr_user ( image->data, script_offset, '\n',
+				    ( image->len - script_offset ) );
 		if ( eol < 0 )
-			eol = script->len;
+			eol = image->len;
 		len = ( eol - script_offset );
 
 		/* Copy line, terminate with NUL, and execute command */
 		{
 			char cmdbuf[ len + 1 ];
 
-			copy_from_user ( cmdbuf, script->data,
+			copy_from_user ( cmdbuf, image->data,
 					 script_offset, len );
 			cmdbuf[len] = '\0';
 			DBG ( "$ %s\n", cmdbuf );
@@ -94,7 +89,7 @@ static int process_script ( int ( * process_line ) ( const char *line ),
 				return rc;
 		}
 
-	} while ( script_offset < script->len );
+	} while ( script_offset < image->len );
 
 	return rc;
 }
@@ -138,7 +133,6 @@ static int script_exec_line ( const char *line ) {
  * @ret rc		Return status code
  */
 static int script_exec ( struct image *image ) {
-	struct image *saved_script;
 	size_t saved_offset;
 	int rc;
 
@@ -148,29 +142,29 @@ static int script_exec ( struct image *image ) {
 	unregister_image ( image );
 
 	/* Preserve state of any currently-running script */
-	saved_script = script;
 	saved_offset = script_offset;
 
-	/* Initialise state for this script */
-	script = image;
-
 	/* Process script */
-	rc = process_script ( script_exec_line, terminate_on_exit_or_failure );
+	rc = process_script ( image, script_exec_line,
+			      terminate_on_exit_or_failure );
 
-	/* Restore saved state, re-register image, and return */
+	/* Restore saved state */
 	script_offset = saved_offset;
-	script = saved_script;
-	register_image ( image );
+
+	/* Re-register image (unless we have been replaced) */
+	if ( ! image->replacement )
+		register_image ( image );
+
 	return rc;
 }
 
 /**
- * Load script into memory
+ * Probe script image
  *
  * @v image		Script
  * @ret rc		Return status code
  */
-static int script_load ( struct image *image ) {
+static int script_probe ( struct image *image ) {
 	static const char ipxe_magic[] = "#!ipxe";
 	static const char gpxe_magic[] = "#!gpxe";
 	linker_assert ( sizeof ( ipxe_magic ) == sizeof ( gpxe_magic ),
@@ -193,20 +187,13 @@ static int script_load ( struct image *image ) {
 		return -ENOEXEC;
 	}
 
-	/* This is a script */
-	image->type = &script_image_type;
-
-	/* We don't actually load it anywhere; we will pick the lines
-	 * out of the image as we need them.
-	 */
-
 	return 0;
 }
 
 /** Script image type */
 struct image_type script_image_type __image_type ( PROBE_NORMAL ) = {
 	.name = "script",
-	.load = script_load,
+	.probe = script_probe,
 	.exec = script_exec,
 };
 
@@ -218,8 +205,7 @@ static struct option_descriptor goto_opts[] = {};
 
 /** "goto" command descriptor */
 static struct command_descriptor goto_cmd =
-	COMMAND_DESC ( struct goto_options, goto_opts, 1, 1,
-		       "<label>", "" );
+	COMMAND_DESC ( struct goto_options, goto_opts, 1, 1, "<label>" );
 
 /**
  * Current "goto" label
@@ -270,9 +256,10 @@ static int goto_exec ( int argc, char **argv ) {
 		return rc;
 
 	/* Sanity check */
-	if ( ! script ) {
-		printf ( "Not in a script\n" );
-		return -ENOTTY;
+	if ( ! current_image ) {
+		rc = -ENOTTY;
+		printf ( "Not in a script: %s\n", strerror ( rc ) );
+		return rc;
 	}
 
 	/* Parse label */
@@ -280,7 +267,7 @@ static int goto_exec ( int argc, char **argv ) {
 
 	/* Find label */
 	saved_offset = script_offset;
-	if ( ( rc = process_script ( goto_find_label,
+	if ( ( rc = process_script ( current_image, goto_find_label,
 				     terminate_on_label_found ) ) != 0 ) {
 		script_offset = saved_offset;
 		return rc;
@@ -296,4 +283,70 @@ static int goto_exec ( int argc, char **argv ) {
 struct command goto_command __command = {
 	.name = "goto",
 	.exec = goto_exec,
+};
+
+/** "prompt" options */
+struct prompt_options {
+	/** Key to wait for */
+	unsigned int key;
+	/** Timeout */
+	unsigned int timeout;
+};
+
+/** "prompt" option list */
+static struct option_descriptor prompt_opts[] = {
+	OPTION_DESC ( "key", 'k', required_argument,
+		      struct prompt_options, key, parse_integer ),
+	OPTION_DESC ( "timeout", 't', required_argument,
+		      struct prompt_options, timeout, parse_integer ),
+};
+
+/** "prompt" command descriptor */
+static struct command_descriptor prompt_cmd =
+	COMMAND_DESC ( struct prompt_options, prompt_opts, 0, MAX_ARGUMENTS,
+		       "[--key <key>] [--timeout <timeout>] [<text>]" );
+
+/**
+ * "prompt" command
+ *
+ * @v argc		Argument count
+ * @v argv		Argument list
+ * @ret rc		Return status code
+ */
+static int prompt_exec ( int argc, char **argv ) {
+	struct prompt_options opts;
+	char *text;
+	int rc;
+
+	/* Parse options */
+	if ( ( rc = parse_options ( argc, argv, &prompt_cmd, &opts ) ) != 0 )
+		goto err_parse;
+
+	/* Parse prompt text */
+	text = concat_args ( &argv[optind] );
+	if ( ! text ) {
+		rc = -ENOMEM;
+		goto err_concat;
+	}
+
+	/* Display prompt and wait for key */
+	if ( ( rc = prompt ( text, opts.timeout, opts.key ) ) != 0 )
+		goto err_prompt;
+
+	/* Free prompt text */
+	free ( text );
+
+	return 0;
+
+ err_prompt:
+	free ( text );
+ err_concat:
+ err_parse:
+	return rc;
+}
+
+/** "prompt" command */
+struct command prompt_command __command = {
+	.name = "prompt",
+	.exec = prompt_exec,
 };

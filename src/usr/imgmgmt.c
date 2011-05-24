@@ -36,22 +36,132 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 /**
- * Download an image
+ * Register an image and leave it registered
+ *
+ * @v image		Executable image
+ * @ret rc		Return status code
+ *
+ * This function assumes an ownership of the passed image.
+ */
+int register_and_put_image ( struct image *image ) {
+	int rc;
+
+	rc = register_image ( image );
+	image_put ( image );
+	return rc;
+}
+
+/**
+ * Register and probe an image
+ *
+ * @v image		Executable image
+ * @ret rc		Return status code
+ *
+ * This function assumes an ownership of the passed image.
+ */
+int register_and_probe_image ( struct image *image ) {
+	int rc;
+
+	if ( ( rc = register_and_put_image ( image ) ) != 0 )
+		return rc;
+
+	if ( ( rc = image_probe ( image ) ) != 0 )
+		return rc;
+
+	return 0;
+}
+
+/**
+ * Register and select an image
+ *
+ * @v image		Executable image
+ * @ret rc		Return status code
+ *
+ * This function assumes an ownership of the passed image.
+ */
+int register_and_select_image ( struct image *image ) {
+	int rc;
+
+	if ( ( rc = register_and_probe_image ( image ) ) != 0 )
+		return rc;
+
+	if ( ( rc = image_select ( image ) ) != 0 )
+		return rc;
+
+	return 0;
+}
+
+/**
+ * Register and boot an image
  *
  * @v image		Image
+ * @ret rc		Return status code
+ *
+ * This function assumes an ownership of the passed image.
+ */
+int register_and_boot_image ( struct image *image ) {
+	int rc;
+
+	if ( ( rc = register_and_select_image ( image ) ) != 0 )
+		return rc;
+
+	if ( ( rc = image_exec ( image ) ) != 0 )
+		return rc;
+
+	return 0;
+}
+
+/**
+ * Register and replace image
+ *
+ * @v image		Image
+ * @ret rc		Return status code
+ *
+ * This function assumes an ownership of the passed image.
+ */
+int register_and_replace_image ( struct image *image ) {
+	int rc;
+
+	if ( ( rc = register_and_probe_image ( image ) ) != 0 )
+		return rc;
+
+	if ( ( rc = image_replace ( image ) ) != 0 )
+		return rc;
+
+	return 0;
+}
+
+/**
+ * Download an image
+ *
  * @v uri		URI
- * @v image_register	Action to take upon a successful download
+ * @v name		Image name, or NULL to use default
+ * @v cmdline		Command line, or NULL for no command line
+ * @v action		Action to take upon a successful download
  * @ret rc		Return status code
  */
-int imgdownload ( struct image *image, struct uri *uri,
-		  int ( * image_register ) ( struct image *image ) ) {
+int imgdownload ( struct uri *uri, const char *name, const char *cmdline,
+		  int ( * action ) ( struct image *image ) ) {
+	struct image *image;
 	size_t len = ( unparse_uri ( NULL, 0, uri, URI_ALL ) + 1 );
 	char uri_string_redacted[len];
 	const char *password;
 	int rc;
 
+	/* Allocate image */
+	image = alloc_image();
+	if ( ! image )
+		return -ENOMEM;
+
+	/* Set image name */
+	if ( name )
+		image_set_name ( image, name );
+
 	/* Set image URI */
 	image_set_uri ( image, uri );
+
+	/* Set image command line */
+	image_set_cmdline ( image, cmdline );
 
 	/* Redact password portion of URI, if necessary */
 	password = uri->password;
@@ -62,83 +172,49 @@ int imgdownload ( struct image *image, struct uri *uri,
 	uri->password = password;
 
 	/* Create downloader */
-	if ( ( rc = create_downloader ( &monojob, image, image_register,
-					LOCATION_URI, uri ) ) != 0 )
+	if ( ( rc = create_downloader ( &monojob, image, LOCATION_URI,
+					uri ) ) != 0 ) {
+		image_put ( image );
 		return rc;
+	}
 
 	/* Wait for download to complete */
-	if ( ( rc = monojob_wait ( uri_string_redacted ) ) != 0 )
+	if ( ( rc = monojob_wait ( uri_string_redacted ) ) != 0 ) {
+		image_put ( image );
+		return rc;
+	}
+
+	/* Act upon downloaded image.  This action assumes our
+	 * ownership of the image.
+	 */
+	if ( ( rc = action ( image ) ) != 0 )
 		return rc;
 
 	return 0;
 }
 
 /**
- * Fetch an image
+ * Download an image
  *
- * @v image		Image
  * @v uri_string	URI as a string (e.g. "http://www.nowhere.com/vmlinuz")
- * @v image_register	Action to take upon a successful fetch
+ * @v name		Image name, or NULL to use default
+ * @v cmdline		Command line, or NULL for no command line
+ * @v action		Action to take upon a successful download
  * @ret rc		Return status code
  */
-int imgfetch ( struct image *image, const char *uri_string,
-	       int ( * image_register ) ( struct image *image ) ) {
+int imgdownload_string ( const char *uri_string, const char *name,
+			 const char *cmdline,
+			 int ( * action ) ( struct image *image ) ) {
 	struct uri *uri;
 	int rc;
 
 	if ( ! ( uri = parse_uri ( uri_string ) ) )
 		return -ENOMEM;
 
-	rc = imgdownload ( image, uri, image_register );
+	rc = imgdownload ( uri, name, cmdline, action );
 
 	uri_put ( uri );
 	return rc;
-}
-
-/**
- * Load an image
- *
- * @v image		Image
- * @ret rc		Return status code
- */
-int imgload ( struct image *image ) {
-	int rc;
-
-	/* Try to load image */
-	if ( ( rc = image_autoload ( image ) ) != 0 )
-		return rc;
-
-	return 0;
-}
-
-/**
- * Execute an image
- *
- * @v image		Image
- * @ret rc		Return status code
- */
-int imgexec ( struct image *image ) {
-	return image_exec ( image );
-}
-
-/**
- * Identify the only loaded image
- *
- * @ret image		Image, or NULL if 0 or >1 images are loaded
- */
-struct image * imgautoselect ( void ) {
-	struct image *image;
-	struct image *selected_image = NULL;
-	int flagged_images = 0;
-
-	for_each_image ( image ) {
-		if ( image->flags & IMAGE_LOADED ) {
-			selected_image = image;
-			flagged_images++;
-		}
-	}
-
-	return ( ( flagged_images == 1 ) ? selected_image : NULL );
 }
 
 /**
@@ -147,11 +223,11 @@ struct image * imgautoselect ( void ) {
  * @v image		Executable/loadable image
  */
 void imgstat ( struct image *image ) {
-	printf ( "%s: %zd bytes", image->name, image->len );
+	printf ( "%s : %zd bytes", image->name, image->len );
 	if ( image->type )
 		printf ( " [%s]", image->type->name );
-	if ( image->flags & IMAGE_LOADED )
-		printf ( " [LOADED]" );
+	if ( image->flags & IMAGE_SELECTED )
+		printf ( " [SELECTED]" );
 	if ( image->cmdline )
 		printf ( " \"%s\"", image->cmdline );
 	printf ( "\n" );

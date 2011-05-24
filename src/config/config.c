@@ -9,6 +9,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 
 #include <config/general.h>
 #include <config/console.h>
+#include <config/sideband.h>
 
 /** @file
  *
@@ -271,3 +272,19 @@ REQUIRE_OBJECT ( embedded );
 #ifdef DRIVERS_LINUX
 REQUIRE_OBJECT ( tap );
 #endif
+
+/*
+ * Drag in relevant BOFM entry points
+ */
+#ifdef CONFIG_BOFM
+#ifdef BOFM_EFI
+REQUIRE_OBJECT ( efi_bofm );
+#endif /* BOFM_EFI */
+#endif /* CONFIG_BOFM */
+
+/*
+ * Drag in selected keyboard map
+ */
+#define REQUIRE_KEYMAP_OBJECT( _map ) REQUIRE_OBJECT ( keymap_ ## _map )
+#define REQUIRE_KEYMAP( _map ) REQUIRE_KEYMAP_OBJECT ( _map )
+REQUIRE_KEYMAP ( KEYBOARD_MAP );
