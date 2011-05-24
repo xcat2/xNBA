@@ -32,6 +32,84 @@ FEATURE ( FEATURE_IMAGE, "EFI", DHCP_EB_FEATURE_EFI, 1 );
 static EFI_GUID efi_loaded_image_protocol_guid
        = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 
+
+/**
+ * Create a Unicode command line for the image
+ *
+ * @v image             EFI image
+ * @v devpath_out       Device path to pass to image (output)
+ * @v cmdline_out       Unicode command line (output)
+ * @v cmdline_len_out   Length of command line in bytes (output)
+ * @ret rc              Return status code
+ */
+static int efi_image_make_cmdline ( struct image *image,
+                                    EFI_DEVICE_PATH **devpath_out,
+                                    VOID **cmdline_out,
+                                    UINT32 *cmdline_len_out ) {
+        char *uri;
+        size_t uri_len;
+        FILEPATH_DEVICE_PATH *devpath;
+        EFI_DEVICE_PATH *endpath;
+        size_t devpath_len;
+        CHAR16 *cmdline = NULL;
+        UINT32 cmdline_len;
+        size_t args_len = 0;
+        UINT32 i;
+
+        /* Get the URI string of the image */
+        uri_len = unparse_uri ( NULL, 0, image->uri, URI_ALL ) + 1;
+
+        /* Compute final command line length */
+        if ( image->cmdline != NULL ) {
+                args_len = strlen ( image->cmdline ) + 1;
+        }
+        cmdline_len = args_len + uri_len;
+
+        /* Allocate space for the uri, final command line and device path */
+        cmdline = malloc ( cmdline_len * sizeof ( CHAR16 ) + uri_len
+                           + SIZE_OF_FILEPATH_DEVICE_PATH
+                           + uri_len * sizeof ( CHAR16 )
+                           + sizeof ( EFI_DEVICE_PATH ) );
+        if ( cmdline == NULL )  {
+                return -ENOMEM;
+        }
+        uri = (char *) ( cmdline + cmdline_len );
+        devpath = (FILEPATH_DEVICE_PATH *) ( uri + uri_len );
+        endpath = (EFI_DEVICE_PATH *) ( (char *) devpath
+                                        + SIZE_OF_FILEPATH_DEVICE_PATH
+                                        + uri_len * sizeof ( CHAR16 ) );
+
+        /* Build the gPXE device path */
+        devpath->Header.Type = MEDIA_DEVICE_PATH;
+        devpath->Header.SubType = MEDIA_FILEPATH_DP;
+        devpath_len = SIZE_OF_FILEPATH_DEVICE_PATH
+                        + uri_len * sizeof ( CHAR16 );
+        devpath->Header.Length[0] = devpath_len & 0xFF;
+        devpath->Header.Length[1] = devpath_len >> 8;
+        endpath->Type = END_DEVICE_PATH_TYPE;
+        endpath->SubType = END_ENTIRE_DEVICE_PATH_SUBTYPE;
+        endpath->Length[0] = 4;
+        endpath->Length[1] = 0;
+        unparse_uri ( uri, uri_len, image->uri, URI_ALL );
+
+        /* Convert to Unicode */
+        for ( i = 0; i < uri_len; i++ ) {
+                cmdline[i] = uri[i];
+                devpath->PathName[i] = uri[i];
+        }
+        if ( image->cmdline ) {
+                cmdline[uri_len - 1] = ' ';
+        }
+        for ( i = 0; i < args_len; i++ ) {
+                cmdline[i + uri_len] = image->cmdline[i];
+        }
+
+        *devpath_out = &devpath->Header;
+        *cmdline_out = cmdline;
+        *cmdline_len_out = cmdline_len * sizeof ( CHAR16 );
+        return 0;
+}
+
 /**
  * Execute EFI image
  *
@@ -69,8 +147,11 @@ static int efi_image_exec ( struct image *image ) {
        }
        loaded_image = loaded_image_void;
 
-       /* Pass a GPXE download protocol to the image */
+       /* Pass an IPXE download protocol to the image */
        rc = efi_download_install ( &device_handle );
+       loaded_image->DeviceHandle = device_handle;
+       rc =  efi_image_make_cmdline ( image, &loaded_image->FilePath,&loaded_image->LoadOptions,&loaded_image->LoadOptionsSize );
+
 
 	/* Start the image */
 	if ( ( efirc = bs->StartImage ( handle, &exit_data_size,
