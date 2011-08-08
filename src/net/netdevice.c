@@ -194,16 +194,17 @@ int netdev_tx ( struct net_device *netdev, struct io_buffer *iobuf ) {
 }
 
 /**
- * Complete network transmission
+ * Discard transmitted packet
  *
  * @v netdev		Network device
- * @v iobuf		I/O buffer
+ * @v iobuf		I/O buffer, or NULL
  * @v rc		Packet status code
  *
- * The packet must currently be in the network device's TX queue.
+ * The packet is discarded and a TX error is recorded.  This function
+ * takes ownership of the I/O buffer.
  */
-void netdev_tx_complete_err ( struct net_device *netdev,
-			      struct io_buffer *iobuf, int rc ) {
+void netdev_tx_err ( struct net_device *netdev,
+		     struct io_buffer *iobuf, int rc ) {
 
 	/* Update statistics counter */
 	netdev_record_stat ( &netdev->tx_stats, rc );
@@ -215,12 +216,28 @@ void netdev_tx_complete_err ( struct net_device *netdev,
 		       netdev->name, iobuf, strerror ( rc ) );
 	}
 
+	/* Discard packet */
+	free_iob ( iobuf );
+}
+
+/**
+ * Complete network transmission
+ *
+ * @v netdev		Network device
+ * @v iobuf		I/O buffer
+ * @v rc		Packet status code
+ *
+ * The packet must currently be in the network device's TX queue.
+ */
+void netdev_tx_complete_err ( struct net_device *netdev,
+			      struct io_buffer *iobuf, int rc ) {
+
 	/* Catch data corruption as early as possible */
 	list_check_contains ( iobuf, &netdev->tx_queue, list );
 
 	/* Dequeue and free I/O buffer */
 	list_del ( &iobuf->list );
-	free_iob ( iobuf );
+	netdev_tx_err ( netdev, iobuf, rc );
 }
 
 /**
@@ -644,7 +661,8 @@ int net_tx ( struct io_buffer *iobuf, struct net_device *netdev,
 	/* Add link-layer header */
 	if ( ( rc = ll_protocol->push ( netdev, iobuf, ll_dest, ll_source,
 					net_protocol->net_proto ) ) != 0 ) {
-		free_iob ( iobuf );
+		/* Record error for diagnosis */
+		netdev_tx_err ( netdev, iobuf, rc );
 		return rc;
 	}
 
@@ -660,17 +678,19 @@ int net_tx ( struct io_buffer *iobuf, struct net_device *netdev,
  * @v net_proto		Network-layer protocol, in network-byte order
  * @v ll_dest		Destination link-layer address
  * @v ll_source		Source link-layer address
+ * @v flags		Packet flags
  * @ret rc		Return status code
  */
 int net_rx ( struct io_buffer *iobuf, struct net_device *netdev,
-	     uint16_t net_proto, const void *ll_dest, const void *ll_source ) {
+	     uint16_t net_proto, const void *ll_dest, const void *ll_source,
+	     unsigned int flags ) {
 	struct net_protocol *net_protocol;
 
 	/* Hand off to network-layer protocol, if any */
 	for_each_table_entry ( net_protocol, NET_PROTOCOLS ) {
 		if ( net_protocol->net_proto == net_proto )
 			return net_protocol->rx ( iobuf, netdev, ll_dest,
-						  ll_source );
+						  ll_source, flags );
 	}
 
 	DBGC ( netdev, "NETDEV %s unknown network protocol %04x\n",
@@ -692,6 +712,7 @@ void net_poll ( void ) {
 	const void *ll_dest;
 	const void *ll_source;
 	uint16_t net_proto;
+	unsigned int flags;
 	int rc;
 
 	/* Poll and process each network device */
@@ -725,7 +746,8 @@ void net_poll ( void ) {
 			ll_protocol = netdev->ll_protocol;
 			if ( ( rc = ll_protocol->pull ( netdev, iobuf,
 							&ll_dest, &ll_source,
-							&net_proto ) ) != 0 ) {
+							&net_proto,
+							&flags ) ) != 0 ) {
 				free_iob ( iobuf );
 				continue;
 			}
@@ -733,7 +755,7 @@ void net_poll ( void ) {
 			/* Hand packet to network layer */
 			if ( ( rc = net_rx ( iob_disown ( iobuf ), netdev,
 					     net_proto, ll_dest,
-					     ll_source ) ) != 0 ) {
+					     ll_source, flags ) ) != 0 ) {
 				/* Record error for diagnosis */
 				netdev_rx_err ( netdev, NULL, rc );
 			}
@@ -751,7 +773,4 @@ static void net_step ( struct process *process __unused ) {
 }
 
 /** Networking stack process */
-struct process net_process __permanent_process = {
-	.list = LIST_HEAD_INIT ( net_process.list ),
-	.step = net_step,
-};
+PERMANENT_PROCESS ( net_process, net_step );

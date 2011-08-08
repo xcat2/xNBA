@@ -1305,6 +1305,24 @@ static int iscsi_rx_login_response ( struct iscsi_session *iscsi,
  */
 
 /**
+ * Pause TX engine
+ *
+ * @v iscsi		iSCSI session
+ */
+static void iscsi_tx_pause ( struct iscsi_session *iscsi ) {
+	process_del ( &iscsi->process );
+}
+
+/**
+ * Resume TX engine
+ *
+ * @v iscsi		iSCSI session
+ */
+static void iscsi_tx_resume ( struct iscsi_session *iscsi ) {
+	process_add ( &iscsi->process );
+}
+
+/**
  * Start up a new TX PDU
  *
  * @v iscsi		iSCSI session
@@ -1315,8 +1333,7 @@ static int iscsi_rx_login_response ( struct iscsi_session *iscsi,
 static void iscsi_start_tx ( struct iscsi_session *iscsi ) {
 
 	assert ( iscsi->tx_state == ISCSI_TX_IDLE );
-	assert ( ! process_running ( &iscsi->process ) );
-	
+
 	/* Initialise TX BHS */
 	memset ( &iscsi->tx_bhs, 0, sizeof ( iscsi->tx_bhs ) );
 
@@ -1324,7 +1341,7 @@ static void iscsi_start_tx ( struct iscsi_session *iscsi ) {
 	iscsi->tx_state = ISCSI_TX_BHS;
 
 	/* Start transmission process */
-	process_add ( &iscsi->process );
+	iscsi_tx_resume ( iscsi );
 }
 
 /**
@@ -1405,7 +1422,7 @@ static void iscsi_tx_done ( struct iscsi_session *iscsi ) {
 	struct iscsi_bhs_common *common = &iscsi->tx_bhs.common;
 
 	/* Stop transmission process */
-	process_del ( &iscsi->process );
+	iscsi_tx_pause ( iscsi );
 
 	switch ( common->opcode & ISCSI_OPCODE_MASK ) {
 	case ISCSI_OPCODE_DATA_OUT:
@@ -1427,9 +1444,7 @@ static void iscsi_tx_done ( struct iscsi_session *iscsi ) {
  * 
  * Constructs data to be sent for the current TX state
  */
-static void iscsi_tx_step ( struct process *process ) {
-	struct iscsi_session *iscsi =
-		container_of ( process, struct iscsi_session, process );
+static void iscsi_tx_step ( struct iscsi_session *iscsi ) {
 	struct iscsi_bhs_common *common = &iscsi->tx_bhs.common;
 	int ( * tx ) ( struct iscsi_session *iscsi );
 	enum iscsi_tx_state next_state;
@@ -1460,8 +1475,8 @@ static void iscsi_tx_step ( struct process *process ) {
 			next_state = ISCSI_TX_IDLE;
 			break;
 		case ISCSI_TX_IDLE:
-			/* Stop processing */
-			iscsi_tx_done ( iscsi );
+			/* Nothing to do; pause processing */
+			iscsi_tx_pause ( iscsi );
 			return;
 		default:
 			assert ( 0 );
@@ -1470,7 +1485,10 @@ static void iscsi_tx_step ( struct process *process ) {
 
 		/* Check for window availability, if needed */
 		if ( tx_len && ( xfer_window ( &iscsi->socket ) == 0 ) ) {
-			/* Cannot transmit at this point; stop processing */
+			/* Cannot transmit at this point; pause
+			 * processing and wait for window to reopen
+			 */
+			iscsi_tx_pause ( iscsi );
 			return;
 		}
 
@@ -1485,8 +1503,18 @@ static void iscsi_tx_step ( struct process *process ) {
 
 		/* Move to next state */
 		iscsi->tx_state = next_state;
+
+		/* If we have moved to the idle state, mark
+		 * transmission as complete
+		 */
+		if ( iscsi->tx_state == ISCSI_TX_IDLE )
+			iscsi_tx_done ( iscsi );
 	}
 }
+
+/** iSCSI TX process descriptor */
+static struct process_descriptor iscsi_process_desc =
+	PROC_DESC ( struct iscsi_session, process, iscsi_tx_step );
 
 /**
  * Receive basic header segment of an iSCSI PDU
@@ -1694,6 +1722,8 @@ static int iscsi_vredirect ( struct iscsi_session *iscsi, int type,
 /** iSCSI socket interface operations */
 static struct interface_operation iscsi_socket_operations[] = {
 	INTF_OP ( xfer_deliver, struct iscsi_session *, iscsi_socket_deliver ),
+	INTF_OP ( xfer_window_changed, struct iscsi_session *,
+		  iscsi_tx_resume ),
 	INTF_OP ( xfer_vredirect, struct iscsi_session *, iscsi_vredirect ),
 	INTF_OP ( intf_close, struct iscsi_session *, iscsi_close ),
 };
@@ -2034,7 +2064,7 @@ static int iscsi_open ( struct interface *parent, struct uri *uri ) {
 	intf_init ( &iscsi->control, &iscsi_control_desc, &iscsi->refcnt );
 	intf_init ( &iscsi->data, &iscsi_data_desc, &iscsi->refcnt );
 	intf_init ( &iscsi->socket, &iscsi_socket_desc, &iscsi->refcnt );
-	process_init_stopped ( &iscsi->process, iscsi_tx_step,
+	process_init_stopped ( &iscsi->process, &iscsi_process_desc,
 			       &iscsi->refcnt );
 
 	/* Parse root path */
