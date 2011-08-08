@@ -92,7 +92,7 @@ struct ib_cmrc_connection {
 /**
  * Shut down CMRC connection gracefully
  *
- * @v process		Process
+ * @v cmrc		Communication-Managed Reliable Connection
  *
  * The Infiniband data structures are not reference-counted or
  * guarded.  It is therefore unsafe to shut them down while we may be
@@ -107,9 +107,7 @@ struct ib_cmrc_connection {
  * connection, ensuring that the structure is not freed before the
  * shutdown process has run.
  */
-static void ib_cmrc_shutdown ( struct process *process ) {
-	struct ib_cmrc_connection *cmrc =
-		container_of ( process, struct ib_cmrc_connection, shutdown );
+static void ib_cmrc_shutdown ( struct ib_cmrc_connection *cmrc ) {
 
 	DBGC ( cmrc, "CMRC %p shutting down\n", cmrc );
 
@@ -118,9 +116,6 @@ static void ib_cmrc_shutdown ( struct process *process ) {
 	ib_destroy_qp ( cmrc->ibdev, cmrc->qp );
 	ib_destroy_cq ( cmrc->ibdev, cmrc->cq );
 	ib_close ( cmrc->ibdev );
-
-	/* Remove process from run queue */
-	process_del ( &cmrc->shutdown );
 
 	/* Drop the remaining reference */
 	ref_put ( &cmrc->refcnt );
@@ -179,6 +174,9 @@ static void ib_cmrc_changed ( struct ib_device *ibdev __unused,
 		ib_cmrc_close ( cmrc, rc_xfer );
 		return;
 	}
+
+	/* Notify upper connection of window change */
+	xfer_window_changed ( &cmrc->xfer );
 
 	/* If we are disconnected, close the upper connection */
 	if ( rc_cm != 0 ) {
@@ -360,6 +358,11 @@ static struct interface_operation ib_cmrc_xfer_operations[] = {
 static struct interface_descriptor ib_cmrc_xfer_desc =
 	INTF_DESC ( struct ib_cmrc_connection, xfer, ib_cmrc_xfer_operations );
 
+/** CMRC shutdown process descriptor */
+static struct process_descriptor ib_cmrc_shutdown_desc =
+	PROC_DESC_ONCE ( struct ib_cmrc_connection, shutdown,
+			 ib_cmrc_shutdown );
+
 /**
  * Open CMRC connection
  *
@@ -385,7 +388,7 @@ int ib_cmrc_open ( struct interface *xfer, struct ib_device *ibdev,
 	cmrc->ibdev = ibdev;
 	memcpy ( &cmrc->dgid, dgid, sizeof ( cmrc->dgid ) );
 	memcpy ( &cmrc->service_id, service_id, sizeof ( cmrc->service_id ) );
-	process_init_stopped ( &cmrc->shutdown, ib_cmrc_shutdown,
+	process_init_stopped ( &cmrc->shutdown, &ib_cmrc_shutdown_desc,
 			       &cmrc->refcnt );
 
 	/* Open Infiniband device */

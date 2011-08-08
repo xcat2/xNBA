@@ -146,8 +146,8 @@ struct fc_els_prli_descriptor fcp_prli_descriptor __fc_els_prli_descriptor = {
 struct fcp_device {
 	/** Reference count */
 	struct refcnt refcnt;
-	/** Fibre Channel upper-layer protocol */
-	struct fc_ulp *ulp;
+	/** Fibre Channel upper-layer protocol user */
+	struct fc_ulp_user user;
 	/** SCSI command issuing interface */
 	struct interface scsi;
 	/** List of active commands */
@@ -649,11 +649,9 @@ static int fcpcmd_recv_unknown ( struct fcp_command *fcpcmd,
 /**
  * Transmit FCP frame
  *
- * @v process		FCP command process
+ * @v fcpcmd		FCP command
  */
-static void fcpcmd_step ( struct process *process ) {
-	struct fcp_command *fcpcmd =
-		container_of ( process, struct fcp_command, process );
+static void fcpcmd_step ( struct fcp_command *fcpcmd ) {
 	int rc;
 
 	/* Send the current IU */
@@ -723,6 +721,10 @@ static struct interface_operation fcpcmd_xchg_op[] = {
 static struct interface_descriptor fcpcmd_xchg_desc =
 	INTF_DESC_PASSTHRU ( struct fcp_command, xchg, fcpcmd_xchg_op, scsi );
 
+/** FCP command process descriptor */
+static struct process_descriptor fcpcmd_process_desc =
+	PROC_DESC ( struct fcp_command, process, fcpcmd_step );
+
 /**
  * Issue FCP SCSI command
  *
@@ -734,13 +736,13 @@ static struct interface_descriptor fcpcmd_xchg_desc =
 static int fcpdev_scsi_command ( struct fcp_device *fcpdev,
 				 struct interface *parent,
 				 struct scsi_cmd *command ) {
-	struct fcp_prli_service_parameters *param = fcpdev->ulp->param;
+	struct fcp_prli_service_parameters *param = fcpdev->user.ulp->param;
 	struct fcp_command *fcpcmd;
 	int xchg_id;
 	int rc;
 
 	/* Check link */
-	if ( ( rc = fcpdev->ulp->link.rc ) != 0 ) {
+	if ( ( rc = fcpdev->user.ulp->link.rc ) != 0 ) {
 		DBGC ( fcpdev, "FCP %p could not issue command while link is "
 		       "down: %s\n", fcpdev, strerror ( rc ) );
 		goto err_link;
@@ -748,7 +750,7 @@ static int fcpdev_scsi_command ( struct fcp_device *fcpdev,
 
 	/* Check target capability */
 	assert ( param != NULL );
-	assert ( fcpdev->ulp->param_len >= sizeof ( *param ) );
+	assert ( fcpdev->user.ulp->param_len >= sizeof ( *param ) );
 	if ( ! ( param->flags & htonl ( FCP_PRLI_TARGET ) ) ) {
 		DBGC ( fcpdev, "FCP %p could not issue command: not a target\n",
 		       fcpdev );
@@ -765,15 +767,16 @@ static int fcpdev_scsi_command ( struct fcp_device *fcpdev,
 	ref_init ( &fcpcmd->refcnt, fcpcmd_free );
 	intf_init ( &fcpcmd->scsi, &fcpcmd_scsi_desc, &fcpcmd->refcnt );
 	intf_init ( &fcpcmd->xchg, &fcpcmd_xchg_desc, &fcpcmd->refcnt );
-	process_init_stopped ( &fcpcmd->process, fcpcmd_step, &fcpcmd->refcnt );
+	process_init_stopped ( &fcpcmd->process, &fcpcmd_process_desc,
+			       &fcpcmd->refcnt );
 	fcpcmd->fcpdev = fcpdev_get ( fcpdev );
 	list_add ( &fcpcmd->list, &fcpdev->fcpcmds );
 	memcpy ( &fcpcmd->command, command, sizeof ( fcpcmd->command ) );
 
 	/* Create new exchange */
 	if ( ( xchg_id = fc_xchg_originate ( &fcpcmd->xchg,
-					     fcpdev->ulp->peer->port,
-					     &fcpdev->ulp->peer->port_id,
+					     fcpdev->user.ulp->peer->port,
+					     &fcpdev->user.ulp->peer->port_id,
 					     FC_TYPE_FCP ) ) < 0 ) {
 		rc = xchg_id;
 		DBGC ( fcpdev, "FCP %p could not create exchange: %s\n",
@@ -822,11 +825,7 @@ static void fcpdev_close ( struct fcp_device *fcpdev, int rc ) {
 	}
 
 	/* Drop reference to ULP */
-	if ( fcpdev->ulp ) {
-		fc_ulp_decrement ( fcpdev->ulp );
-		fc_ulp_put ( fcpdev->ulp );
-		fcpdev->ulp = NULL;
-	}
+	fc_ulp_detach ( &fcpdev->user );
 }
 
 /**
@@ -836,7 +835,8 @@ static void fcpdev_close ( struct fcp_device *fcpdev, int rc ) {
  * @ret len		Length of window
  */
 static size_t fcpdev_window ( struct fcp_device *fcpdev ) {
-	return ( fc_link_ok ( &fcpdev->ulp->link ) ? ~( ( size_t ) 0 ) : 0 );
+	return ( fc_link_ok ( &fcpdev->user.ulp->link ) ?
+		 ~( ( size_t ) 0 ) : 0 );
 }
 
 /**
@@ -897,15 +897,15 @@ static struct device * fcpdev_identify_device ( struct fcp_device *fcpdev ) {
 	/* We know the underlying device only if the link is up;
 	 * otherwise we don't have a port to examine.
 	 */
-	if ( ! fc_link_ok ( &fcpdev->ulp->link ) ) {
+	if ( ! fc_link_ok ( &fcpdev->user.ulp->link ) ) {
 		DBGC ( fcpdev, "FCP %p doesn't know underlying device "
 		       "until link is up\n", fcpdev );
 		return NULL;
 	}
 
 	/* Hand off to port's transport interface */
-	assert ( fcpdev->ulp->peer->port != NULL );
-	return identify_device ( &fcpdev->ulp->peer->port->transport );
+	assert ( fcpdev->user.ulp->peer->port != NULL );
+	return identify_device ( &fcpdev->user.ulp->peer->port->transport );
 }
 
 /** FCP device SCSI interface operations */
@@ -922,6 +922,26 @@ static struct interface_operation fcpdev_scsi_op[] = {
 /** FCP device SCSI interface descriptor */
 static struct interface_descriptor fcpdev_scsi_desc =
 	INTF_DESC ( struct fcp_device, scsi, fcpdev_scsi_op );
+
+/**
+ * Examine FCP ULP link state
+ *
+ * @v user		Fibre Channel upper-layer protocol user
+ */
+static void fcpdev_examine ( struct fc_ulp_user *user ) {
+	struct fcp_device *fcpdev =
+		container_of ( user, struct fcp_device, user );
+
+	if ( fc_link_ok ( &fcpdev->user.ulp->link ) ) {
+		DBGC ( fcpdev, "FCP %p link is up\n", fcpdev );
+	} else {
+		DBGC ( fcpdev, "FCP %p link is down: %s\n",
+		       fcpdev, strerror ( fcpdev->user.ulp->link.rc ) );
+	}
+
+	/* Notify SCSI layer of window change */
+	xfer_window_changed ( &fcpdev->scsi );
+}
 
 /**
  * Open FCP device
@@ -953,10 +973,12 @@ static int fcpdev_open ( struct interface *parent, struct fc_name *wwn,
 	ref_init ( &fcpdev->refcnt, NULL );
 	intf_init ( &fcpdev->scsi, &fcpdev_scsi_desc, &fcpdev->refcnt );
 	INIT_LIST_HEAD ( &fcpdev->fcpcmds );
-	fcpdev->ulp = fc_ulp_get ( ulp );
-	fc_ulp_increment ( fcpdev->ulp );
+	fc_ulp_user_init ( &fcpdev->user, fcpdev_examine, &fcpdev->refcnt );
 
 	DBGC ( fcpdev, "FCP %p opened for %s\n", fcpdev, fc_ntoa ( wwn ) );
+
+	/* Attach to Fibre Channel ULP */
+	fc_ulp_attach ( ulp, &fcpdev->user );
 
 	/* Preserve parameters required for boot firmware table */
 	memcpy ( &fcpdev->wwn, wwn, sizeof ( fcpdev->wwn ) );

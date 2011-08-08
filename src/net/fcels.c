@@ -244,19 +244,14 @@ static struct interface_descriptor fc_els_job_desc =
 /**
  * Fibre Channel ELS process
  *
- * @v process		Process
+ * @v els		Fibre Channel ELS transaction
  */
-static void fc_els_step ( struct process *process ) {
-	struct fc_els *els =
-		container_of ( process, struct fc_els, process );
+static void fc_els_step ( struct fc_els *els ) {
 	int xchg_id;
 	int rc;
 
 	/* Sanity check */
 	assert ( fc_els_is_request ( els ) );
-
-	/* Stop process */
-	process_del ( &els->process );
 
 	/* Create exchange */
 	if ( ( xchg_id = fc_xchg_originate ( &els->xchg, els->port,
@@ -278,6 +273,10 @@ static void fc_els_step ( struct process *process ) {
 	}
 }
 
+/** Fibre Channel ELS process descriptor */
+static struct process_descriptor fc_els_process_desc =
+	PROC_DESC_ONCE ( struct fc_els, process, fc_els_step );
+
 /**
  * Create ELS transaction
  *
@@ -298,7 +297,8 @@ static struct fc_els * fc_els_create ( struct fc_port *port,
 	ref_init ( &els->refcnt, fc_els_free );
 	intf_init ( &els->job, &fc_els_job_desc, &els->refcnt );
 	intf_init ( &els->xchg, &fc_els_xchg_desc, &els->refcnt );
-	process_init_stopped ( &els->process, fc_els_step, &els->refcnt );
+	process_init_stopped ( &els->process, &fc_els_process_desc,
+			       &els->refcnt );
 	els->port = fc_port_get ( port );
 	memcpy ( &els->port_id, port_id, sizeof ( els->port_id ) );
 	memcpy ( &els->peer_port_id, peer_port_id,
