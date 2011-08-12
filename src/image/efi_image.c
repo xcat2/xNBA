@@ -150,6 +150,7 @@ static int efi_image_exec ( struct image *image ) {
        /* Pass an IPXE download protocol to the image */
        rc = efi_download_install ( &device_handle );
        loaded_image->DeviceHandle = device_handle;
+       loaded_image->ParentHandle = efi_loaded_image;
        rc =  efi_image_make_cmdline ( image, &loaded_image->FilePath,&loaded_image->LoadOptions,&loaded_image->LoadOptionsSize );
 
 
