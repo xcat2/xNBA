@@ -196,6 +196,11 @@ int efi_download_install ( EFI_HANDLE *device_handle ) {
 	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
 	EFI_STATUS efirc;
 	EFI_HANDLE handle = NULL;
+        if (efi_loaded_image->DeviceHandle) { /* TODO: ensure handle is the NIC (maybe efi_image has a better way to indicate the handle doing SNP?) */
+               handle = efi_loaded_image->DeviceHandle;
+       }
+ 
+
 
 	DBG ( "Installing ipxe protocol interface (%p)... ",
 	      &ipxe_download_protocol_interface );
