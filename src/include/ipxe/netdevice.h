@@ -432,6 +432,9 @@ struct net_driver {
 /** Bus ID setting tag */
 #define NETDEV_SETTING_TAG_BUS_ID NETDEV_SETTING_TAG ( 0x02 )
 
+/** MAC address setting tag */
+#define NETDEV_SETTING_TAG_MACHYP NETDEV_SETTING_TAG ( 0x03 )
+
 extern struct list_head net_devices;
 extern struct net_device_operations null_netdev_operations;
 extern struct settings_operations netdev_settings_operations;

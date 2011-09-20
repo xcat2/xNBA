@@ -44,7 +44,7 @@ struct setting machyp_setting __setting ( SETTING_NETDEV ) = {
 	.name = "machyp",
 	.description = "MAC address",
 	.type = &setting_type_hexhyp,
-	.tag = NETDEV_SETTING_TAG_MAC,
+	.tag = NETDEV_SETTING_TAG_MACHYP,
 };
 struct setting busid_setting __setting ( SETTING_NETDEV ) = {
 	.name = "busid",
