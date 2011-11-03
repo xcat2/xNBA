@@ -31,6 +31,10 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/command.h>
 #include <ipxe/parseopt.h>
 #include <ipxe/settings.h>
+#include <ipxe/console.h>
+#include <ipxe/keys.h>
+#include <ipxe/process.h>
+#include <ipxe/nap.h>
 #include <ipxe/shell.h>
 
 /** @file
@@ -526,4 +530,55 @@ static int iseq_exec ( int argc, char **argv ) {
 struct command iseq_command __command = {
 	.name = "iseq",
 	.exec = iseq_exec,
+};
+
+/** "sleep" options */
+struct sleep_options {};
+
+/** "sleep" option list */
+static struct option_descriptor sleep_opts[] = {};
+
+/** "sleep" command descriptor */
+static struct command_descriptor sleep_cmd =
+	COMMAND_DESC ( struct sleep_options, sleep_opts, 1, 1, "<seconds>" );
+
+/**
+ * "sleep" command
+ *
+ * @v argc		Argument count
+ * @v argv		Argument list
+ * @ret rc		Return status code
+ */
+static int sleep_exec ( int argc, char **argv ) {
+	struct sleep_options opts;
+	unsigned int seconds;
+	unsigned long start;
+	unsigned long delay;
+	int rc;
+
+	/* Parse options */
+	if ( ( rc = parse_options ( argc, argv, &sleep_cmd, &opts ) ) != 0 )
+		return rc;
+
+	/* Parse number of seconds */
+	if ( ( rc = parse_integer ( argv[optind], &seconds ) ) != 0 )
+		return rc;
+
+	/* Delay for specified number of seconds */
+	start = currticks();
+	delay = ( seconds * TICKS_PER_SEC );
+	while ( ( currticks() - start ) <= delay ) {
+		step();
+		if ( iskey() && ( getchar() == CTRL_C ) )
+			return -ECANCELED;
+		cpu_nap();
+	}
+
+	return 0;
+}
+
+/** "sleep" command */
+struct command sleep_command __command = {
+	.name = "sleep",
+	.exec = sleep_exec,
 };
