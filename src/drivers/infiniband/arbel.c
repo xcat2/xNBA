@@ -31,6 +31,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <byteswap.h>
 #include <ipxe/io.h>
 #include <ipxe/pci.h>
+#include <ipxe/pcibackup.h>
 #include <ipxe/malloc.h>
 #include <ipxe/umalloc.h>
 #include <ipxe/iobuf.h>
@@ -1894,195 +1895,6 @@ static void arbel_poll_eq ( struct ib_device *ibdev ) {
 
 /***************************************************************************
  *
- * Infiniband link-layer operations
- *
- ***************************************************************************
- */
-
-/**
- * Initialise Infiniband link
- *
- * @v ibdev		Infiniband device
- * @ret rc		Return status code
- */
-static int arbel_open ( struct ib_device *ibdev ) {
-	struct arbel *arbel = ib_get_drvdata ( ibdev );
-	struct arbelprm_init_ib init_ib;
-	int rc;
-
-	memset ( &init_ib, 0, sizeof ( init_ib ) );
-	MLX_FILL_3 ( &init_ib, 0,
-		     mtu_cap, ARBEL_MTU_2048,
-		     port_width_cap, 3,
-		     vl_cap, 1 );
-	MLX_FILL_1 ( &init_ib, 1, max_gid, 1 );
-	MLX_FILL_1 ( &init_ib, 2, max_pkey, 64 );
-	if ( ( rc = arbel_cmd_init_ib ( arbel, ibdev->port,
-					&init_ib ) ) != 0 ) {
-		DBGC ( arbel, "Arbel %p port %d could not intialise IB: %s\n",
-		       arbel, ibdev->port, strerror ( rc ) );
-		return rc;
-	}
-
-	/* Update MAD parameters */
-	ib_smc_update ( ibdev, arbel_mad );
-
-	return 0;
-}
-
-/**
- * Close Infiniband link
- *
- * @v ibdev		Infiniband device
- */
-static void arbel_close ( struct ib_device *ibdev ) {
-	struct arbel *arbel = ib_get_drvdata ( ibdev );
-	int rc;
-
-	if ( ( rc = arbel_cmd_close_ib ( arbel, ibdev->port ) ) != 0 ) {
-		DBGC ( arbel, "Arbel %p port %d could not close IB: %s\n",
-		       arbel, ibdev->port, strerror ( rc ) );
-		/* Nothing we can do about this */
-	}
-}
-
-/**
- * Inform embedded subnet management agent of a received MAD
- *
- * @v ibdev		Infiniband device
- * @v mad		MAD
- * @ret rc		Return status code
- */
-static int arbel_inform_sma ( struct ib_device *ibdev, union ib_mad *mad ) {
-	int rc;
-
-	/* Send the MAD to the embedded SMA */
-	if ( ( rc = arbel_mad ( ibdev, mad ) ) != 0 )
-		return rc;
-
-	/* Update parameters held in software */
-	ib_smc_update ( ibdev, arbel_mad );
-
-	return 0;
-}
-
-/***************************************************************************
- *
- * Multicast group operations
- *
- ***************************************************************************
- */
-
-/**
- * Attach to multicast group
- *
- * @v ibdev		Infiniband device
- * @v qp		Queue pair
- * @v gid		Multicast GID
- * @ret rc		Return status code
- */
-static int arbel_mcast_attach ( struct ib_device *ibdev,
-				struct ib_queue_pair *qp,
-				union ib_gid *gid ) {
-	struct arbel *arbel = ib_get_drvdata ( ibdev );
-	struct arbelprm_mgm_hash hash;
-	struct arbelprm_mgm_entry mgm;
-	unsigned int index;
-	int rc;
-
-	/* Generate hash table index */
-	if ( ( rc = arbel_cmd_mgid_hash ( arbel, gid, &hash ) ) != 0 ) {
-		DBGC ( arbel, "Arbel %p could not hash GID: %s\n",
-		       arbel, strerror ( rc ) );
-		return rc;
-	}
-	index = MLX_GET ( &hash, hash );
-
-	/* Check for existing hash table entry */
-	if ( ( rc = arbel_cmd_read_mgm ( arbel, index, &mgm ) ) != 0 ) {
-		DBGC ( arbel, "Arbel %p could not read MGM %#x: %s\n",
-		       arbel, index, strerror ( rc ) );
-		return rc;
-	}
-	if ( MLX_GET ( &mgm, mgmqp_0.qi ) != 0 ) {
-		/* FIXME: this implementation allows only a single QP
-		 * per multicast group, and doesn't handle hash
-		 * collisions.  Sufficient for IPoIB but may need to
-		 * be extended in future.
-		 */
-		DBGC ( arbel, "Arbel %p MGID index %#x already in use\n",
-		       arbel, index );
-		return -EBUSY;
-	}
-
-	/* Update hash table entry */
-	MLX_FILL_2 ( &mgm, 8,
-		     mgmqp_0.qpn_i, qp->qpn,
-		     mgmqp_0.qi, 1 );
-	memcpy ( &mgm.u.dwords[4], gid, sizeof ( *gid ) );
-	if ( ( rc = arbel_cmd_write_mgm ( arbel, index, &mgm ) ) != 0 ) {
-		DBGC ( arbel, "Arbel %p could not write MGM %#x: %s\n",
-		       arbel, index, strerror ( rc ) );
-		return rc;
-	}
-
-	return 0;
-}
-
-/**
- * Detach from multicast group
- *
- * @v ibdev		Infiniband device
- * @v qp		Queue pair
- * @v gid		Multicast GID
- */
-static void arbel_mcast_detach ( struct ib_device *ibdev,
-				 struct ib_queue_pair *qp __unused,
-				 union ib_gid *gid ) {
-	struct arbel *arbel = ib_get_drvdata ( ibdev );
-	struct arbelprm_mgm_hash hash;
-	struct arbelprm_mgm_entry mgm;
-	unsigned int index;
-	int rc;
-
-	/* Generate hash table index */
-	if ( ( rc = arbel_cmd_mgid_hash ( arbel, gid, &hash ) ) != 0 ) {
-		DBGC ( arbel, "Arbel %p could not hash GID: %s\n",
-		       arbel, strerror ( rc ) );
-		return;
-	}
-	index = MLX_GET ( &hash, hash );
-
-	/* Clear hash table entry */
-	memset ( &mgm, 0, sizeof ( mgm ) );
-	if ( ( rc = arbel_cmd_write_mgm ( arbel, index, &mgm ) ) != 0 ) {
-		DBGC ( arbel, "Arbel %p could not write MGM %#x: %s\n",
-		       arbel, index, strerror ( rc ) );
-		return;
-	}
-}
-
-/** Arbel Infiniband operations */
-static struct ib_device_operations arbel_ib_operations = {
-	.create_cq	= arbel_create_cq,
-	.destroy_cq	= arbel_destroy_cq,
-	.create_qp	= arbel_create_qp,
-	.modify_qp	= arbel_modify_qp,
-	.destroy_qp	= arbel_destroy_qp,
-	.post_send	= arbel_post_send,
-	.post_recv	= arbel_post_recv,
-	.poll_cq	= arbel_poll_cq,
-	.poll_eq	= arbel_poll_eq,
-	.open		= arbel_open,
-	.close		= arbel_close,
-	.mcast_attach	= arbel_mcast_attach,
-	.mcast_detach	= arbel_mcast_detach,
-	.set_port_info	= arbel_inform_sma,
-	.set_pkey_table	= arbel_inform_sma,
-};
-
-/***************************************************************************
- *
  * Firmware control
  *
  ***************************************************************************
@@ -2180,7 +1992,7 @@ static int arbel_start_firmware ( struct arbel *arbel ) {
 	struct arbelprm_query_fw fw;
 	struct arbelprm_access_lam lam;
 	unsigned int fw_pages;
-	size_t fw_size;
+	size_t fw_len;
 	physaddr_t fw_base;
 	uint64_t eq_set_ci_base_addr;
 	int rc;
@@ -2208,17 +2020,22 @@ static int arbel_start_firmware ( struct arbel *arbel ) {
 	arbel_cmd_enable_lam ( arbel, &lam );
 
 	/* Allocate firmware pages and map firmware area */
-	fw_size = ( fw_pages * ARBEL_PAGE_SIZE );
-	arbel->firmware_area = umalloc ( fw_size );
+	fw_len = ( fw_pages * ARBEL_PAGE_SIZE );
 	if ( ! arbel->firmware_area ) {
-		rc = -ENOMEM;
-		goto err_alloc_fa;
+		arbel->firmware_len = fw_len;
+		arbel->firmware_area = umalloc ( arbel->firmware_len );
+		if ( ! arbel->firmware_area ) {
+			rc = -ENOMEM;
+			goto err_alloc_fa;
+		}
+	} else {
+		assert ( arbel->firmware_len == fw_len );
 	}
 	fw_base = user_to_phys ( arbel->firmware_area, 0 );
 	DBGC ( arbel, "Arbel %p firmware area at [%08lx,%08lx)\n",
-	       arbel, fw_base, ( fw_base + fw_size ) );
+	       arbel, fw_base, ( fw_base + fw_len ) );
 	if ( ( rc = arbel_map_vpm ( arbel, arbel_cmd_map_fa,
-				    0, fw_base, fw_size ) ) != 0 ) {
+				    0, fw_base, fw_len ) ) != 0 ) {
 		DBGC ( arbel, "Arbel %p could not map firmware: %s\n",
 		       arbel, strerror ( rc ) );
 		goto err_map_fa;
@@ -2237,8 +2054,6 @@ static int arbel_start_firmware ( struct arbel *arbel ) {
  err_run_fw:
 	arbel_cmd_unmap_fa ( arbel );
  err_map_fa:
-	ufree ( arbel->firmware_area );
-	arbel->firmware_area = UNULL;
  err_alloc_fa:
  err_query_fw:
 	return rc;
@@ -2256,10 +2071,9 @@ static void arbel_stop_firmware ( struct arbel *arbel ) {
 		DBGC ( arbel, "Arbel %p FATAL could not stop firmware: %s\n",
 		       arbel, strerror ( rc ) );
 		/* Leak memory and return; at least we avoid corruption */
+		arbel->firmware_area = UNULL;
 		return;
 	}
-	ufree ( arbel->firmware_area );
-	arbel->firmware_area = UNULL;
 }
 
 /***************************************************************************
@@ -2369,6 +2183,7 @@ static int arbel_alloc_icm ( struct arbel *arbel,
 	unsigned int log_num_uars, log_num_qps, log_num_srqs, log_num_ees;
 	unsigned int log_num_cqs, log_num_mtts, log_num_mpts, log_num_rdbs;
 	unsigned int log_num_eqs, log_num_mcs;
+	size_t icm_len, icm_aux_len;
 	size_t len;
 	physaddr_t icm_phys;
 	int rc;
@@ -2540,7 +2355,7 @@ static int arbel_alloc_icm ( struct arbel *arbel,
 
 	/* Record amount of ICM to be allocated */
 	icm_offset = icm_align ( icm_offset, ARBEL_PAGE_SIZE );
-	arbel->icm_len = icm_offset;
+	icm_len = icm_offset;
 
 	/* User access region contexts
 	 *
@@ -2565,24 +2380,29 @@ static int arbel_alloc_icm ( struct arbel *arbel,
 
 	/* Get ICM auxiliary area size */
 	memset ( &icm_size, 0, sizeof ( icm_size ) );
-	MLX_FILL_1 ( &icm_size, 1, value, arbel->icm_len );
+	MLX_FILL_1 ( &icm_size, 1, value, icm_len );
 	if ( ( rc = arbel_cmd_set_icm_size ( arbel, &icm_size,
 					     &icm_aux_size ) ) != 0 ) {
 		DBGC ( arbel, "Arbel %p could not set ICM size: %s\n",
 		       arbel, strerror ( rc ) );
 		goto err_set_icm_size;
 	}
-	arbel->icm_aux_len =
-		( MLX_GET ( &icm_aux_size, value ) * ARBEL_PAGE_SIZE );
+	icm_aux_len = ( MLX_GET ( &icm_aux_size, value ) * ARBEL_PAGE_SIZE );
 
 	/* Allocate ICM data and auxiliary area */
 	DBGC ( arbel, "Arbel %p requires %zd kB ICM and %zd kB AUX ICM\n",
-	       arbel, ( arbel->icm_len / 1024 ),
-	       ( arbel->icm_aux_len / 1024 ) );
-	arbel->icm = umalloc ( arbel->icm_len + arbel->icm_aux_len );
+	       arbel, ( icm_len / 1024 ), ( icm_aux_len / 1024 ) );
 	if ( ! arbel->icm ) {
-		rc = -ENOMEM;
-		goto err_alloc_icm;
+		arbel->icm_len = icm_len;
+		arbel->icm_aux_len = icm_aux_len;
+		arbel->icm = umalloc ( arbel->icm_len + arbel->icm_aux_len );
+		if ( ! arbel->icm ) {
+			rc = -ENOMEM;
+			goto err_alloc_icm;
+		}
+	} else {
+		assert ( arbel->icm_len == icm_len );
+		assert ( arbel->icm_aux_len == icm_aux_len );
 	}
 	icm_phys = user_to_phys ( arbel->icm, 0 );
 
@@ -2648,8 +2468,6 @@ static int arbel_alloc_icm ( struct arbel *arbel,
 	free_dma ( arbel->db_rec, ARBEL_PAGE_SIZE );
 	arbel->db_rec= NULL;
  err_alloc_doorbell:
-	ufree ( arbel->icm );
-	arbel->icm = UNULL;
  err_alloc_icm:
  err_set_icm_size:
 	return rc;
@@ -2672,16 +2490,40 @@ static void arbel_free_icm ( struct arbel *arbel ) {
 	arbel_cmd_unmap_icm_aux ( arbel );
 	free_dma ( arbel->db_rec, ARBEL_PAGE_SIZE );
 	arbel->db_rec = NULL;
-	ufree ( arbel->icm );
-	arbel->icm = UNULL;
 }
 
 /***************************************************************************
  *
- * PCI interface
+ * Initialisation and teardown
  *
  ***************************************************************************
  */
+
+/**
+ * Reset device
+ *
+ * @v arbel		Arbel device
+ */
+static void arbel_reset ( struct arbel *arbel ) {
+	struct pci_device *pci = arbel->pci;
+	struct pci_config_backup backup;
+	static const uint8_t backup_exclude[] =
+		PCI_CONFIG_BACKUP_EXCLUDE ( 0x58, 0x5c );
+	uint16_t vendor;
+	unsigned int i;
+
+	/* Perform device reset and preserve PCI configuration */
+	pci_backup ( pci, &backup, backup_exclude );
+	writel ( ARBEL_RESET_MAGIC,
+		 ( arbel->config + ARBEL_RESET_OFFSET ) );
+	for ( i = 0 ; i < ARBEL_RESET_WAIT_TIME_MS ; i++ ) {
+		mdelay ( 1 );
+		pci_read_config_word ( pci, PCI_VENDOR_ID, &vendor );
+		if ( vendor != 0xffff )
+			break;
+	}
+	pci_restore ( pci, &backup, backup_exclude );
+}
 
 /**
  * Set up memory protection table
@@ -2762,70 +2604,22 @@ static int arbel_configure_special_qps ( struct arbel *arbel ) {
 }
 
 /**
- * Probe PCI device
+ * Start Arbel device
  *
- * @v pci		PCI device
- * @v id		PCI ID
+ * @v arbel		Arbel device
+ * @v running		Firmware is already running
  * @ret rc		Return status code
  */
-static int arbel_probe ( struct pci_device *pci ) {
-	struct arbel *arbel;
-	struct ib_device *ibdev;
+static int arbel_start ( struct arbel *arbel, int running ) {
 	struct arbelprm_init_hca init_hca;
-	int i;
+	unsigned int i;
 	int rc;
 
-	/* Allocate Arbel device */
-	arbel = zalloc ( sizeof ( *arbel ) );
-	if ( ! arbel ) {
-		rc = -ENOMEM;
-		goto err_alloc_arbel;
+	/* Start firmware if not already running */
+	if ( ! running ) {
+		if ( ( rc = arbel_start_firmware ( arbel ) ) != 0 )
+			goto err_start_firmware;
 	}
-	pci_set_drvdata ( pci, arbel );
-
-	/* Allocate Infiniband devices */
-	for ( i = 0 ; i < ARBEL_NUM_PORTS ; i++ ) {
-		ibdev = alloc_ibdev ( 0 );
-		if ( ! ibdev ) {
-			rc = -ENOMEM;
-			goto err_alloc_ibdev;
-		}
-		arbel->ibdev[i] = ibdev;
-		ibdev->op = &arbel_ib_operations;
-		ibdev->dev = &pci->dev;
-		ibdev->port = ( ARBEL_PORT_BASE + i );
-		ib_set_drvdata ( ibdev, arbel );
-	}
-
-	/* Fix up PCI device */
-	adjust_pci_device ( pci );
-
-	/* Get PCI BARs */
-	arbel->config = ioremap ( pci_bar_start ( pci, ARBEL_PCI_CONFIG_BAR ),
-				  ARBEL_PCI_CONFIG_BAR_SIZE );
-	arbel->uar = ioremap ( ( pci_bar_start ( pci, ARBEL_PCI_UAR_BAR ) +
-				 ARBEL_PCI_UAR_IDX * ARBEL_PCI_UAR_SIZE ),
-			       ARBEL_PCI_UAR_SIZE );
-
-	/* Allocate space for mailboxes */
-	arbel->mailbox_in = malloc_dma ( ARBEL_MBOX_SIZE, ARBEL_MBOX_ALIGN );
-	if ( ! arbel->mailbox_in ) {
-		rc = -ENOMEM;
-		goto err_mailbox_in;
-	}
-	arbel->mailbox_out = malloc_dma ( ARBEL_MBOX_SIZE, ARBEL_MBOX_ALIGN );
-	if ( ! arbel->mailbox_out ) {
-		rc = -ENOMEM;
-		goto err_mailbox_out;
-	}
-
-	/* Start firmware */
-	if ( ( rc = arbel_start_firmware ( arbel ) ) != 0 )
-		goto err_start_firmware;
-
-	/* Get device limits */
-	if ( ( rc = arbel_get_limits ( arbel ) ) != 0 )
-		goto err_get_limits;
 
 	/* Allocate ICM */
 	memset ( &init_hca, 0, sizeof ( init_hca ) );
@@ -2853,6 +2647,388 @@ static int arbel_probe ( struct pci_device *pci ) {
 	if ( ( rc = arbel_configure_special_qps ( arbel ) ) != 0 )
 		goto err_conf_special_qps;
 
+	return 0;
+
+ err_conf_special_qps:
+	arbel_destroy_eq ( arbel );
+ err_create_eq:
+ err_setup_mpt:
+	arbel_cmd_close_hca ( arbel );
+ err_init_hca:
+	arbel_free_icm ( arbel );
+ err_alloc_icm:
+	arbel_stop_firmware ( arbel );
+ err_start_firmware:
+	return rc;
+}
+
+/**
+ * Stop Arbel device
+ *
+ * @v arbel		Arbel device
+ */
+static void arbel_stop ( struct arbel *arbel ) {
+	arbel_destroy_eq ( arbel );
+	arbel_cmd_close_hca ( arbel );
+	arbel_free_icm ( arbel );
+	arbel_stop_firmware ( arbel );
+	arbel_reset ( arbel );
+}
+
+/**
+ * Open Arbel device
+ *
+ * @v arbel		Arbel device
+ * @ret rc		Return status code
+ */
+static int arbel_open ( struct arbel *arbel ) {
+	int rc;
+
+	/* Start device if applicable */
+	if ( arbel->open_count == 0 ) {
+		if ( ( rc = arbel_start ( arbel, 0 ) ) != 0 )
+			return rc;
+	}
+
+	/* Increment open counter */
+	arbel->open_count++;
+
+	return 0;
+}
+
+/**
+ * Close Arbel device
+ *
+ * @v arbel		Arbel device
+ */
+static void arbel_close ( struct arbel *arbel ) {
+
+	/* Decrement open counter */
+	assert ( arbel->open_count != 0 );
+	arbel->open_count--;
+
+	/* Stop device if applicable */
+	if ( arbel->open_count == 0 )
+		arbel_stop ( arbel );
+}
+
+/***************************************************************************
+ *
+ * Infiniband link-layer operations
+ *
+ ***************************************************************************
+ */
+
+/**
+ * Initialise Infiniband link
+ *
+ * @v ibdev		Infiniband device
+ * @ret rc		Return status code
+ */
+static int arbel_ib_open ( struct ib_device *ibdev ) {
+	struct arbel *arbel = ib_get_drvdata ( ibdev );
+	struct arbelprm_init_ib init_ib;
+	int rc;
+
+	/* Open hardware */
+	if ( ( rc = arbel_open ( arbel ) ) != 0 )
+		goto err_open;
+
+	/* Initialise IB */
+	memset ( &init_ib, 0, sizeof ( init_ib ) );
+	MLX_FILL_3 ( &init_ib, 0,
+		     mtu_cap, ARBEL_MTU_2048,
+		     port_width_cap, 3,
+		     vl_cap, 1 );
+	MLX_FILL_1 ( &init_ib, 1, max_gid, 1 );
+	MLX_FILL_1 ( &init_ib, 2, max_pkey, 64 );
+	if ( ( rc = arbel_cmd_init_ib ( arbel, ibdev->port,
+					&init_ib ) ) != 0 ) {
+		DBGC ( arbel, "Arbel %p port %d could not intialise IB: %s\n",
+		       arbel, ibdev->port, strerror ( rc ) );
+		goto err_init_ib;
+	}
+
+	/* Update MAD parameters */
+	ib_smc_update ( ibdev, arbel_mad );
+
+	return 0;
+
+ err_init_ib:
+	arbel_close ( arbel );
+ err_open:
+	return rc;
+}
+
+/**
+ * Close Infiniband link
+ *
+ * @v ibdev		Infiniband device
+ */
+static void arbel_ib_close ( struct ib_device *ibdev ) {
+	struct arbel *arbel = ib_get_drvdata ( ibdev );
+	int rc;
+
+	/* Close IB */
+	if ( ( rc = arbel_cmd_close_ib ( arbel, ibdev->port ) ) != 0 ) {
+		DBGC ( arbel, "Arbel %p port %d could not close IB: %s\n",
+		       arbel, ibdev->port, strerror ( rc ) );
+		/* Nothing we can do about this */
+	}
+
+	/* Close hardware */
+	arbel_close ( arbel );
+}
+
+/**
+ * Inform embedded subnet management agent of a received MAD
+ *
+ * @v ibdev		Infiniband device
+ * @v mad		MAD
+ * @ret rc		Return status code
+ */
+static int arbel_inform_sma ( struct ib_device *ibdev, union ib_mad *mad ) {
+	int rc;
+
+	/* Send the MAD to the embedded SMA */
+	if ( ( rc = arbel_mad ( ibdev, mad ) ) != 0 )
+		return rc;
+
+	/* Update parameters held in software */
+	ib_smc_update ( ibdev, arbel_mad );
+
+	return 0;
+}
+
+/***************************************************************************
+ *
+ * Multicast group operations
+ *
+ ***************************************************************************
+ */
+
+/**
+ * Attach to multicast group
+ *
+ * @v ibdev		Infiniband device
+ * @v qp		Queue pair
+ * @v gid		Multicast GID
+ * @ret rc		Return status code
+ */
+static int arbel_mcast_attach ( struct ib_device *ibdev,
+				struct ib_queue_pair *qp,
+				union ib_gid *gid ) {
+	struct arbel *arbel = ib_get_drvdata ( ibdev );
+	struct arbelprm_mgm_hash hash;
+	struct arbelprm_mgm_entry mgm;
+	unsigned int index;
+	int rc;
+
+	/* Generate hash table index */
+	if ( ( rc = arbel_cmd_mgid_hash ( arbel, gid, &hash ) ) != 0 ) {
+		DBGC ( arbel, "Arbel %p could not hash GID: %s\n",
+		       arbel, strerror ( rc ) );
+		return rc;
+	}
+	index = MLX_GET ( &hash, hash );
+
+	/* Check for existing hash table entry */
+	if ( ( rc = arbel_cmd_read_mgm ( arbel, index, &mgm ) ) != 0 ) {
+		DBGC ( arbel, "Arbel %p could not read MGM %#x: %s\n",
+		       arbel, index, strerror ( rc ) );
+		return rc;
+	}
+	if ( MLX_GET ( &mgm, mgmqp_0.qi ) != 0 ) {
+		/* FIXME: this implementation allows only a single QP
+		 * per multicast group, and doesn't handle hash
+		 * collisions.  Sufficient for IPoIB but may need to
+		 * be extended in future.
+		 */
+		DBGC ( arbel, "Arbel %p MGID index %#x already in use\n",
+		       arbel, index );
+		return -EBUSY;
+	}
+
+	/* Update hash table entry */
+	MLX_FILL_2 ( &mgm, 8,
+		     mgmqp_0.qpn_i, qp->qpn,
+		     mgmqp_0.qi, 1 );
+	memcpy ( &mgm.u.dwords[4], gid, sizeof ( *gid ) );
+	if ( ( rc = arbel_cmd_write_mgm ( arbel, index, &mgm ) ) != 0 ) {
+		DBGC ( arbel, "Arbel %p could not write MGM %#x: %s\n",
+		       arbel, index, strerror ( rc ) );
+		return rc;
+	}
+
+	return 0;
+}
+
+/**
+ * Detach from multicast group
+ *
+ * @v ibdev		Infiniband device
+ * @v qp		Queue pair
+ * @v gid		Multicast GID
+ */
+static void arbel_mcast_detach ( struct ib_device *ibdev,
+				 struct ib_queue_pair *qp __unused,
+				 union ib_gid *gid ) {
+	struct arbel *arbel = ib_get_drvdata ( ibdev );
+	struct arbelprm_mgm_hash hash;
+	struct arbelprm_mgm_entry mgm;
+	unsigned int index;
+	int rc;
+
+	/* Generate hash table index */
+	if ( ( rc = arbel_cmd_mgid_hash ( arbel, gid, &hash ) ) != 0 ) {
+		DBGC ( arbel, "Arbel %p could not hash GID: %s\n",
+		       arbel, strerror ( rc ) );
+		return;
+	}
+	index = MLX_GET ( &hash, hash );
+
+	/* Clear hash table entry */
+	memset ( &mgm, 0, sizeof ( mgm ) );
+	if ( ( rc = arbel_cmd_write_mgm ( arbel, index, &mgm ) ) != 0 ) {
+		DBGC ( arbel, "Arbel %p could not write MGM %#x: %s\n",
+		       arbel, index, strerror ( rc ) );
+		return;
+	}
+}
+
+/** Arbel Infiniband operations */
+static struct ib_device_operations arbel_ib_operations = {
+	.create_cq	= arbel_create_cq,
+	.destroy_cq	= arbel_destroy_cq,
+	.create_qp	= arbel_create_qp,
+	.modify_qp	= arbel_modify_qp,
+	.destroy_qp	= arbel_destroy_qp,
+	.post_send	= arbel_post_send,
+	.post_recv	= arbel_post_recv,
+	.poll_cq	= arbel_poll_cq,
+	.poll_eq	= arbel_poll_eq,
+	.open		= arbel_ib_open,
+	.close		= arbel_ib_close,
+	.mcast_attach	= arbel_mcast_attach,
+	.mcast_detach	= arbel_mcast_detach,
+	.set_port_info	= arbel_inform_sma,
+	.set_pkey_table	= arbel_inform_sma,
+};
+
+/***************************************************************************
+ *
+ * PCI interface
+ *
+ ***************************************************************************
+ */
+
+/**
+ * Allocate Arbel device
+ *
+ * @ret arbel		Arbel device
+ */
+static struct arbel * arbel_alloc ( void ) {
+	struct arbel *arbel;
+
+	/* Allocate Arbel device */
+	arbel = zalloc ( sizeof ( *arbel ) );
+	if ( ! arbel )
+		goto err_arbel;
+
+	/* Allocate space for mailboxes */
+	arbel->mailbox_in = malloc_dma ( ARBEL_MBOX_SIZE, ARBEL_MBOX_ALIGN );
+	if ( ! arbel->mailbox_in )
+		goto err_mailbox_in;
+	arbel->mailbox_out = malloc_dma ( ARBEL_MBOX_SIZE, ARBEL_MBOX_ALIGN );
+	if ( ! arbel->mailbox_out )
+		goto err_mailbox_out;
+
+	return arbel;
+
+	free_dma ( arbel->mailbox_out, ARBEL_MBOX_SIZE );
+ err_mailbox_out:
+	free_dma ( arbel->mailbox_in, ARBEL_MBOX_SIZE );
+ err_mailbox_in:
+	free ( arbel );
+ err_arbel:
+	return NULL;
+}
+
+/**
+ * Free Arbel device
+ *
+ * @v arbel		Arbel device
+ */
+static void arbel_free ( struct arbel *arbel ) {
+
+	ufree ( arbel->icm );
+	ufree ( arbel->firmware_area );
+	free_dma ( arbel->mailbox_out, ARBEL_MBOX_SIZE );
+	free_dma ( arbel->mailbox_in, ARBEL_MBOX_SIZE );
+	free ( arbel );
+}
+
+/**
+ * Probe PCI device
+ *
+ * @v pci		PCI device
+ * @v id		PCI ID
+ * @ret rc		Return status code
+ */
+static int arbel_probe ( struct pci_device *pci ) {
+	struct arbel *arbel;
+	struct ib_device *ibdev;
+	int i;
+	int rc;
+
+	/* Allocate Arbel device */
+	arbel = arbel_alloc();
+	if ( ! arbel ) {
+		rc = -ENOMEM;
+		goto err_alloc;
+	}
+	pci_set_drvdata ( pci, arbel );
+	arbel->pci = pci;
+
+	/* Allocate Infiniband devices */
+	for ( i = 0 ; i < ARBEL_NUM_PORTS ; i++ ) {
+		ibdev = alloc_ibdev ( 0 );
+		if ( ! ibdev ) {
+			rc = -ENOMEM;
+			goto err_alloc_ibdev;
+		}
+		arbel->ibdev[i] = ibdev;
+		ibdev->op = &arbel_ib_operations;
+		ibdev->dev = &pci->dev;
+		ibdev->port = ( ARBEL_PORT_BASE + i );
+		ib_set_drvdata ( ibdev, arbel );
+	}
+
+	/* Fix up PCI device */
+	adjust_pci_device ( pci );
+
+	/* Get PCI BARs */
+	arbel->config = ioremap ( pci_bar_start ( pci, ARBEL_PCI_CONFIG_BAR ),
+				  ARBEL_PCI_CONFIG_BAR_SIZE );
+	arbel->uar = ioremap ( ( pci_bar_start ( pci, ARBEL_PCI_UAR_BAR ) +
+				 ARBEL_PCI_UAR_IDX * ARBEL_PCI_UAR_SIZE ),
+			       ARBEL_PCI_UAR_SIZE );
+
+	/* Reset device */
+	arbel_reset ( arbel );
+
+	/* Start firmware */
+	if ( ( rc = arbel_start_firmware ( arbel ) ) != 0 )
+		goto err_start_firmware;
+
+	/* Get device limits */
+	if ( ( rc = arbel_get_limits ( arbel ) ) != 0 )
+		goto err_get_limits;
+
+	/* Start device */
+	if ( ( rc = arbel_start ( arbel, 1 ) ) != 0 )
+		goto err_start;
+
 	/* Initialise parameters using SMC */
 	for ( i = 0 ; i < ARBEL_NUM_PORTS ; i++ )
 		ib_smc_init ( arbel->ibdev[i], arbel_mad );
@@ -2867,33 +3043,27 @@ static int arbel_probe ( struct pci_device *pci ) {
 		}
 	}
 
+	/* Leave device quiescent until opened */
+	if ( arbel->open_count == 0 )
+		arbel_stop ( arbel );
+
 	return 0;
 
 	i = ARBEL_NUM_PORTS;
  err_register_ibdev:
 	for ( i-- ; i >= 0 ; i-- )
 		unregister_ibdev ( arbel->ibdev[i] );
- err_conf_special_qps:
-	arbel_destroy_eq ( arbel );
- err_create_eq:
- err_setup_mpt:
-	arbel_cmd_close_hca ( arbel );
- err_init_hca:
-	arbel_free_icm ( arbel );
- err_alloc_icm:
+	arbel_stop ( arbel );
+ err_start:
  err_get_limits:
 	arbel_stop_firmware ( arbel );
  err_start_firmware:
-	free_dma ( arbel->mailbox_out, ARBEL_MBOX_SIZE );
- err_mailbox_out:
-	free_dma ( arbel->mailbox_in, ARBEL_MBOX_SIZE );
- err_mailbox_in:
 	i = ARBEL_NUM_PORTS;
  err_alloc_ibdev:
 	for ( i-- ; i >= 0 ; i-- )
 		ibdev_put ( arbel->ibdev[i] );
-	free ( arbel );
- err_alloc_arbel:
+	arbel_free ( arbel );
+ err_alloc:
 	return rc;
 }
 
@@ -2908,15 +3078,9 @@ static void arbel_remove ( struct pci_device *pci ) {
 
 	for ( i = ( ARBEL_NUM_PORTS - 1 ) ; i >= 0 ; i-- )
 		unregister_ibdev ( arbel->ibdev[i] );
-	arbel_destroy_eq ( arbel );
-	arbel_cmd_close_hca ( arbel );
-	arbel_free_icm ( arbel );
-	arbel_stop_firmware ( arbel );
-	free_dma ( arbel->mailbox_out, ARBEL_MBOX_SIZE );
-	free_dma ( arbel->mailbox_in, ARBEL_MBOX_SIZE );
 	for ( i = ( ARBEL_NUM_PORTS - 1 ) ; i >= 0 ; i-- )
 		ibdev_put ( arbel->ibdev[i] );
-	free ( arbel );
+	arbel_free ( arbel );
 }
 
 static struct pci_device_id arbel_nics[] = {

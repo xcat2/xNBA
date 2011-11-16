@@ -326,7 +326,6 @@ process_bytes:
 #ifndef KEEP_IT_REAL
 
 	/* Preserve registers */
-	pushfw
 	pushl	%eax
 	pushl	%ebp
 
@@ -397,7 +396,6 @@ process_bytes:
 	/* Restore registers and return */
 	popl	%ebp
 	popl	%eax
-	popfw
 	ret
 
 #else /* KEEP_IT_REAL */
@@ -614,17 +612,19 @@ install:
 	/* Preserve registers */
 	pushl	%esi
 	pushl	%edi
+	pushl	%ebp
 	/* Allocate space for .text16 and .data16 */
 	call	alloc_basemem
 	/* Image source = %cs:0000 */
 	xorl	%esi, %esi
 	/* Image destination = default */
 	xorl	%edi, %edi
-	/* Allow relocation */
-	clc
+	/* Allow arbitrary relocation */
+	xorl	%ebp, %ebp
 	/* Install text and data segments */
 	call	install_prealloc
 	/* Restore registers and return */
+	popl	%ebp
 	popl	%edi
 	popl	%esi
 	ret
@@ -640,7 +640,7 @@ install:
  *   %bx  : .data16 segment address
  *   %esi : Image source physical address (or zero for %cs:0000)
  *   %edi : Decompression temporary area physical address (or zero for default)
- *   CF set : Avoid relocating to top of memory
+ *   %ebp : Maximum end address for relocation (or zero for no maximum)
  * Corrupts:
  *   none
  ****************************************************************************
@@ -655,14 +655,13 @@ install_prealloc:
 	pushw	%ds
 	pushw	%es
 	cld			/* Sanity: clear the direction flag asap */
-	pushfw
 
 	/* Set up %ds for (read-only) access to .prefix */
 	pushw	%cs
 	popw	%ds
 
-	/* Copy decompression temporary area physical address to %ebp */
-	movl	%edi, %ebp
+	/* Save decompression temporary area physical address */
+	pushl	%edi
 
 	/* Install .text16.early */
 	progress "  .text16.early\n"
@@ -747,6 +746,9 @@ payload_death_message:
 	/* Set up %ds for access to .data16 */
 	movw	%bx, %ds
 
+	/* Restore decompression temporary area physical address */
+	popl	%edi
+
 #ifdef KEEP_IT_REAL
 	/* Initialise libkir */
 	movw	%ax, (init_libkir_vector+2)
@@ -754,7 +756,7 @@ payload_death_message:
 #else
 	/* Find a suitable decompression temporary area, if none specified */
 	pushl	%eax
-	testl	%ebp, %ebp
+	testl	%edi, %edi
 	jnz	1f
 	/* Use INT 15,88 to find the highest available address via INT
 	 * 15,88.  This limits us to around 64MB, which should avoid
@@ -762,14 +764,14 @@ payload_death_message:
 	 */
 	movb	$0x88, %ah
 	int	$0x15
-	movw	%ax, %bp
-	addl	$0x400, %ebp
-	subl	$_textdata_memsz_kb, %ebp
-	shll	$10, %ebp
+	movw	%ax, %di
+	addl	$0x400, %edi
+	subl	$_textdata_memsz_kb, %edi
+	shll	$10, %edi
 	/* Sanity check: if we have ended up below 1MB, use 1MB */
-	cmpl	$0x100000, %ebp
+	cmpl	$0x100000, %edi
 	jae	1f
-	movl	$0x100000, %ebp
+	movl	$0x100000, %edi
 1:	popl	%eax
 
 	/* Install .text and .data to temporary area in high memory,
@@ -777,21 +779,16 @@ payload_death_message:
 	 * properly.
 	 */
 	progress "  .textdata\n"
-	movl	%ebp, %edi
+	pushl	%edi
 	movl	$_textdata_filesz, %ecx
 	movl	$_textdata_memsz, %edx
 	call	install_block
+	popl	%edi
 
 	/* Initialise librm at current location */
 	progress "  init_librm\n"
 	movw	%ax, (init_librm_vector+2)
-	movl	%ebp, %edi
 	lcall	*init_librm_vector
-
-	/* Skip relocation if CF was set on entry */
-	popfw
-	pushfw
-	jc	skip_relocate
 
 	/* Call relocate() to determine target address for relocation.
 	 * relocate() will return with %esi, %edi and %ecx set up
@@ -815,7 +812,6 @@ payload_death_message:
 	/* Initialise librm at new location */
 	progress "  init_librm\n"
 	lcall	*init_librm_vector
-skip_relocate:
 #endif
 
 	/* Close access to payload */
@@ -824,7 +820,6 @@ skip_relocate:
 	lcall	*close_payload_vector
 
 	/* Restore registers */
-	popfw
 	popw	%es
 	popw	%ds
 	popal
