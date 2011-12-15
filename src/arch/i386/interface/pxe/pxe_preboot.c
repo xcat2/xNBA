@@ -130,7 +130,8 @@ static union pxe_cached_info __bss16_array ( cached_info, [NUM_CACHED_INFOS] );
  * @ret ...
  *
  */
-PXENV_EXIT_t pxenv_unload_stack ( struct s_PXENV_UNLOAD_STACK *unload_stack ) {
+static PXENV_EXIT_t
+pxenv_unload_stack ( struct s_PXENV_UNLOAD_STACK *unload_stack ) {
 	DBGC ( &pxe_netdev, "PXENV_UNLOAD_STACK\n" );
 
 	unload_stack->Status = PXENV_STATUS_SUCCESS;
@@ -141,8 +142,8 @@ PXENV_EXIT_t pxenv_unload_stack ( struct s_PXENV_UNLOAD_STACK *unload_stack ) {
  *
  * Status: working
  */
-PXENV_EXIT_t pxenv_get_cached_info ( struct s_PXENV_GET_CACHED_INFO
-				     *get_cached_info ) {
+static PXENV_EXIT_t
+pxenv_get_cached_info ( struct s_PXENV_GET_CACHED_INFO *get_cached_info ) {
 	struct pxe_dhcp_packet_creator *creator;
 	union pxe_cached_info *info;
 	unsigned int idx;
@@ -154,6 +155,14 @@ PXENV_EXIT_t pxenv_get_cached_info ( struct s_PXENV_GET_CACHED_INFO
 	       pxenv_get_cached_info_name ( get_cached_info->PacketType ),
 	       get_cached_info->Buffer.segment,
 	       get_cached_info->Buffer.offset, get_cached_info->BufferSize );
+
+	/* Sanity check */
+	if ( ! pxe_netdev ) {
+		DBGC ( &pxe_netdev, "PXENV_GET_CACHED_INFO called with no "
+		       "network device\n" );
+		get_cached_info->Status = PXENV_STATUS_UNDI_INVALID_STATE;
+		return PXENV_EXIT_FAILURE;
+	}
 
 	/* Sanity check */
         idx = ( get_cached_info->PacketType - 1 );
@@ -236,8 +245,8 @@ PXENV_EXIT_t pxenv_get_cached_info ( struct s_PXENV_GET_CACHED_INFO
  *
  * Status: working
  */
-PXENV_EXIT_t pxenv_restart_tftp ( struct s_PXENV_TFTP_READ_FILE
-				  *restart_tftp ) {
+static PXENV_EXIT_t
+pxenv_restart_tftp ( struct s_PXENV_TFTP_READ_FILE *restart_tftp ) {
 	PXENV_EXIT_t tftp_exit;
 
 	DBGC ( &pxe_netdev, "PXENV_RESTART_TFTP\n" );
@@ -259,7 +268,7 @@ PXENV_EXIT_t pxenv_restart_tftp ( struct s_PXENV_TFTP_READ_FILE
  *
  * Status: working
  */
-PXENV_EXIT_t pxenv_start_undi ( struct s_PXENV_START_UNDI *start_undi ) {
+static PXENV_EXIT_t pxenv_start_undi ( struct s_PXENV_START_UNDI *start_undi ) {
 	unsigned int bus_type;
 	unsigned int location;
 	struct net_device *netdev;
@@ -308,7 +317,7 @@ PXENV_EXIT_t pxenv_start_undi ( struct s_PXENV_START_UNDI *start_undi ) {
  *
  * Status: working
  */
-PXENV_EXIT_t pxenv_stop_undi ( struct s_PXENV_STOP_UNDI *stop_undi ) {
+static PXENV_EXIT_t pxenv_stop_undi ( struct s_PXENV_STOP_UNDI *stop_undi ) {
 	DBGC ( &pxe_netdev, "PXENV_STOP_UNDI\n" );
 
 	/* Deactivate PXE */
@@ -333,7 +342,7 @@ PXENV_EXIT_t pxenv_stop_undi ( struct s_PXENV_STOP_UNDI *stop_undi ) {
  *
  * Status: won't implement (requires major structural changes)
  */
-PXENV_EXIT_t pxenv_start_base ( struct s_PXENV_START_BASE *start_base ) {
+static PXENV_EXIT_t pxenv_start_base ( struct s_PXENV_START_BASE *start_base ) {
 	DBGC ( &pxe_netdev, "PXENV_START_BASE\n" );
 
 	start_base->Status = PXENV_STATUS_UNSUPPORTED;
@@ -344,7 +353,7 @@ PXENV_EXIT_t pxenv_start_base ( struct s_PXENV_START_BASE *start_base ) {
  *
  * Status: working
  */
-PXENV_EXIT_t pxenv_stop_base ( struct s_PXENV_STOP_BASE *stop_base ) {
+static PXENV_EXIT_t pxenv_stop_base ( struct s_PXENV_STOP_BASE *stop_base ) {
 	DBGC ( &pxe_netdev, "PXENV_STOP_BASE\n" );
 
 	/* The only time we will be called is when the NBP is trying
@@ -355,3 +364,21 @@ PXENV_EXIT_t pxenv_stop_base ( struct s_PXENV_STOP_BASE *stop_base ) {
 	stop_base->Status = PXENV_STATUS_SUCCESS;
 	return PXENV_EXIT_SUCCESS;
 }
+
+/** PXE preboot API */
+struct pxe_api_call pxe_preboot_api[] __pxe_api_call = {
+	PXE_API_CALL ( PXENV_UNLOAD_STACK, pxenv_unload_stack,
+		       struct s_PXENV_UNLOAD_STACK ),
+	PXE_API_CALL ( PXENV_GET_CACHED_INFO, pxenv_get_cached_info,
+		       struct s_PXENV_GET_CACHED_INFO ),
+	PXE_API_CALL ( PXENV_RESTART_TFTP, pxenv_restart_tftp,
+		       struct s_PXENV_TFTP_READ_FILE ),
+	PXE_API_CALL ( PXENV_START_UNDI, pxenv_start_undi,
+		       struct s_PXENV_START_UNDI ),
+	PXE_API_CALL ( PXENV_STOP_UNDI, pxenv_stop_undi,
+		       struct s_PXENV_STOP_UNDI ),
+	PXE_API_CALL ( PXENV_START_BASE, pxenv_start_base,
+		       struct s_PXENV_START_BASE ),
+	PXE_API_CALL ( PXENV_STOP_BASE, pxenv_stop_base,
+		       struct s_PXENV_STOP_BASE ),
+};
