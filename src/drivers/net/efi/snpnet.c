@@ -76,11 +76,11 @@ static int snpnet_transmit ( struct net_device *netdev,
 static void snpnet_complete ( struct net_device *netdev, void *txbuf ) {
 	struct io_buffer *tmp;
 	struct io_buffer *iobuf;
+	struct snpnet_device *snpnetdev = netdev->priv;
+	snpnetdev->txpending--;
 
 	list_for_each_entry_safe ( iobuf, tmp, &netdev->tx_queue, list ) {
 		if ( iobuf->data == txbuf ) {
-			struct snpnet_device *snpnetdev = netdev->priv;
-			snpnetdev->txpending--;
 			netdev_tx_complete ( netdev, iobuf );
 			break;
 		}
