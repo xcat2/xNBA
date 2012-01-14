@@ -43,9 +43,6 @@ struct snpnet_device {
 
 	/** State that the SNP should be in after close */
 	UINT32 close_state;
-
-	/** Count of packets awaiting confirmed transmit */
-	UINT32 txpending;
 };
 
 /**
@@ -61,7 +58,6 @@ static int snpnet_transmit ( struct net_device *netdev,
 	EFI_SIMPLE_NETWORK_PROTOCOL *snp = snpnetdev->snp;
 	EFI_STATUS efirc;
 	size_t len = iob_len ( iobuf );
-	snpnetdev->txpending++;
 
 	efirc = snp->Transmit ( snp, 0, len, iobuf->data, NULL, NULL, NULL );
 	return EFIRC_TO_RC ( efirc );
@@ -79,8 +75,6 @@ static void snpnet_complete ( struct net_device *netdev, void *txbuf ) {
 
 	list_for_each_entry_safe ( iobuf, tmp, &netdev->tx_queue, list ) {
 		if ( iobuf->data == txbuf ) {
-			struct snpnet_device *snpnetdev = netdev->priv;
-			snpnetdev->txpending--;
 			netdev_tx_complete ( netdev, iobuf );
 			break;
 		}
@@ -101,7 +95,7 @@ static void snpnet_poll ( struct net_device *netdev ) {
 	void *txbuf;
 
 	/* Process Tx completions */
-	while ( snpnetdev->txpending ) {
+	while ( 1 ) {
 		efirc = snp->GetStatus ( snp, NULL, &txbuf );
 		if ( efirc ) {
 			DBGC ( snp, "SNP %p could not get status %s\n", snp,
@@ -109,8 +103,10 @@ static void snpnet_poll ( struct net_device *netdev ) {
 			break;
 		}
 
-		if ( txbuf != NULL )
-			snpnet_complete ( netdev, txbuf );
+		if ( txbuf == NULL )
+			break;
+
+		snpnet_complete ( netdev, txbuf );
 	}
 
 	/* Process received packets */
