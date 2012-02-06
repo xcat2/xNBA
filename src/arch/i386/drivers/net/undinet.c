@@ -271,12 +271,6 @@ static void undinet_poll ( struct net_device *netdev ) {
 							   "nop\n\t"
 							   "cli\n\t" ) : : );
 
-			/* If interrupts are known to be supported,
-			 * then do nothing on this poll; wait for the
-			 * interrupt to be triggered.
-			 */
-			if ( undinic->irq_supported )
-				return;
 		}
 
 		/* Start ISR processing */
