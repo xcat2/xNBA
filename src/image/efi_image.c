@@ -19,18 +19,12 @@
 FILE_LICENCE ( GPL2_OR_LATER );
 
 #include <errno.h>
-#include <stdlib.h>
 #include <ipxe/efi/efi.h>
 #include <ipxe/image.h>
 #include <ipxe/init.h>
 #include <ipxe/features.h>
-#include <ipxe/uri.h>
 
 FEATURE ( FEATURE_IMAGE, "EFI", DHCP_EB_FEATURE_EFI, 1 );
-
-/** EFI loaded image protocol GUID */
-static EFI_GUID efi_loaded_image_protocol_guid
-       = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 
 /**
  * Execute EFI image
@@ -40,10 +34,7 @@ static EFI_GUID efi_loaded_image_protocol_guid
  */
 static int efi_image_exec ( struct image *image ) {
 	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
-        EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
-        void *loaded_image_void;
 	EFI_HANDLE handle;
-        EFI_HANDLE device_handle = NULL;
 	UINTN exit_data_size;
 	CHAR16 *exit_data;
 	EFI_STATUS efirc;
@@ -59,19 +50,6 @@ static int efi_image_exec ( struct image *image ) {
 		return -ENOEXEC;
 	}
 
-        /* Get the loaded image protocol for the newly loaded image */
-       efirc = bs->OpenProtocol ( handle, &efi_loaded_image_protocol_guid,
-                                  &loaded_image_void, efi_image_handle, NULL,
-                                  EFI_OPEN_PROTOCOL_GET_PROTOCOL );
-       if ( efirc ) {
-               /* Should never happen */
-               rc = EFIRC_TO_RC ( efirc );
-       }
-       loaded_image = loaded_image_void;
-
-       /* Pass a GPXE download protocol to the image */
-       rc = efi_download_install ( &device_handle );
-
 	/* Start the image */
 	if ( ( efirc = bs->StartImage ( handle, &exit_data_size,
 					&exit_data ) ) != 0 ) {
@@ -79,9 +57,6 @@ static int efi_image_exec ( struct image *image ) {
 		       image, efi_strerror ( efirc ) );
 	}
 	rc = EFIRC_TO_RC ( efirc );
-        if ( device_handle ) {
-		efi_download_uninstall ( device_handle );
-        }
 
 	/* Unload the image.  We can't leave it loaded, because we
 	 * have no "unload" operation.
