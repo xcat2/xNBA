@@ -7,6 +7,7 @@
 #include <ipxe/timer.h>
 #include <ipxe/iobuf.h>
 #include <ipxe/malloc.h>
+#include <ipxe/init.h>
 #include <ipxe/retry.h>
 #include <ipxe/refcnt.h>
 #include <ipxe/xfer.h>
@@ -343,6 +344,7 @@ static void tcp_close ( struct tcp_connection *tcp, int rc ) {
 
 		/* Remove from list and drop reference */
 		stop_timer ( &tcp->timer );
+		stop_timer ( &tcp->wait );
 		list_del ( &tcp->list );
 		ref_put ( &tcp->refcnt );
 		DBGC ( tcp, "TCP %p connection deleted\n", tcp );
@@ -1143,7 +1145,7 @@ static int tcp_rx ( struct io_buffer *iobuf,
 	flags = tcphdr->flags;
 	tcp_rx_opts ( tcp, ( ( ( void * ) tcphdr ) + sizeof ( *tcphdr ) ),
 		      ( hlen - sizeof ( *tcphdr ) ), &options );
-	if ( options.tsopt )
+	if ( tcp && options.tsopt )
 		tcp->ts_val = ntohl ( options.tsopt->tsval );
 	iob_pull ( iobuf, hlen );
 	len = iob_len ( iobuf );
@@ -1260,6 +1262,26 @@ static unsigned int tcp_discard ( void ) {
 /** TCP cache discarder */
 struct cache_discarder tcp_cache_discarder __cache_discarder = {
 	.discard = tcp_discard,
+};
+
+/**
+ * Shut down all TCP connections
+ *
+ */
+static void tcp_shutdown ( int booting __unused ) {
+	struct tcp_connection *tcp;
+
+	while ( ( tcp = list_first_entry ( &tcp_conns, struct tcp_connection,
+					   list ) ) != NULL ) {
+		tcp->tcp_state = TCP_CLOSED;
+		tcp_dump_state ( tcp );
+		tcp_close ( tcp, -ECANCELED );
+	}
+}
+
+/** TCP shutdown function */
+struct startup_fn tcp_startup_fn __startup_fn ( STARTUP_EARLY ) = {
+	.shutdown = tcp_shutdown,
 };
 
 /***************************************************************************

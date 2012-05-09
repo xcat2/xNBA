@@ -7,6 +7,7 @@ CLEANUP		:=
 CFLAGS		:=
 ASFLAGS		:=
 LDFLAGS		:=
+HOST_CFLAGS	:=
 MAKEDEPS	:= Makefile
 
 ###############################################################################
@@ -32,6 +33,7 @@ RANLIB		:= $(CROSS_COMPILE)ranlib
 OBJCOPY		:= $(CROSS_COMPILE)objcopy
 NM		:= $(CROSS_COMPILE)nm
 OBJDUMP		:= $(CROSS_COMPILE)objdump
+OPENSSL		:= openssl
 PARSEROM	:= ./util/parserom.pl
 FIXROM		:= ./util/fixrom.pl
 SYMCHECK	:= ./util/symcheck.pl

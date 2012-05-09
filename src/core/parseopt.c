@@ -26,7 +26,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <errno.h>
 #include <getopt.h>
 #include <ipxe/netdevice.h>
-#include <ipxe/image.h>
+#include <ipxe/menu.h>
 #include <ipxe/parseopt.h>
 
 /** @file
@@ -115,21 +115,22 @@ int parse_netdev ( const char *text, struct net_device **netdev ) {
 }
 
 /**
- * Parse image name
+ * Parse menu name
  *
  * @v text		Text
- * @ret image		Image
+ * @ret menu		Menu
  * @ret rc		Return status code
  */
-int parse_image ( const char *text, struct image **image ) {
+int parse_menu ( const char *text, struct menu **menu ) {
 
-	/* Sanity check */
-	assert ( text != NULL );
-
-	/* Find network device */
-	*image = find_image ( text );
-	if ( ! *image ) {
-		printf ( "\"%s\": no such image\n", text );
+	/* Find menu */
+	*menu = find_menu ( text );
+	if ( ! *menu ) {
+		if ( text ) {
+			printf ( "\"%s\": no such menu\n", text );
+		} else {
+			printf ( "No default menu\n" );
+		}
 		return -ENOENT;
 	}
 
@@ -149,6 +150,25 @@ int parse_flag ( const char *text __unused, int *flag ) {
 	*flag = 1;
 
 	return 0;
+}
+
+/**
+ * Parse key
+ *
+ * @v text		Text
+ * @ret key		Key
+ * @ret rc		Return status code
+ */
+int parse_key ( const char *text, unsigned int *key ) {
+
+	/* Interpret single characters as being a literal key character */
+	if ( text[0] && ! text[1] ) {
+		*key = text[0];
+		return 0;
+	}
+
+	/* Otherwise, interpret as an integer */
+	return parse_integer ( text, key );
 }
 
 /**

@@ -25,6 +25,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <errno.h>
 #include <assert.h>
 #include <libgen.h>
+#include <syslog.h>
 #include <ipxe/list.h>
 #include <ipxe/umalloc.h>
 #include <ipxe/uri.h>
@@ -36,11 +37,27 @@ FILE_LICENCE ( GPL2_OR_LATER );
  *
  */
 
+/* Disambiguate the various error causes */
+#define EACCES_UNTRUSTED \
+	__einfo_error ( EINFO_EACCES_UNTRUSTED )
+#define EINFO_EACCES_UNTRUSTED \
+	__einfo_uniqify ( EINFO_EACCES, 0x01, "Untrusted image" )
+#define EACCES_PERMANENT \
+	__einfo_error ( EINFO_EACCES_PERMANENT )
+#define EINFO_EACCES_PERMANENT \
+	__einfo_uniqify ( EINFO_EACCES, 0x02, "Trust requirement is permanent" )
+
 /** List of registered images */
 struct list_head images = LIST_HEAD_INIT ( images );
 
 /** Currently-executing image */
 struct image *current_image;
+
+/** Current image trust requirement */
+static int require_trusted_images = 0;
+
+/** Prevent changes to image trust requirement */
+static int require_trusted_images_permanent = 0;
 
 /**
  * Free executable image
@@ -50,48 +67,70 @@ struct image *current_image;
 static void free_image ( struct refcnt *refcnt ) {
 	struct image *image = container_of ( refcnt, struct image, refcnt );
 
+	DBGC ( image, "IMAGE %s freed\n", image->name );
+	free ( image->name );
 	free ( image->cmdline );
 	uri_put ( image->uri );
 	ufree ( image->data );
 	image_put ( image->replacement );
 	free ( image );
-	DBGC ( image, "IMAGE %s freed\n", image->name );
 }
 
 /**
  * Allocate executable image
  *
+ * @v uri		URI, or NULL
  * @ret image		Executable image
  */
-struct image * alloc_image ( void ) {
+struct image * alloc_image ( struct uri *uri ) {
+	const char *name;
 	struct image *image;
+	int rc;
 
+	/* Allocate image */
 	image = zalloc ( sizeof ( *image ) );
-	if ( image ) {
-		ref_init ( &image->refcnt, free_image );
+	if ( ! image )
+		goto err_alloc;
+
+	/* Initialise image */
+	ref_init ( &image->refcnt, free_image );
+	if ( uri ) {
+		image->uri = uri_get ( uri );
+		if ( uri->path ) {
+			name = basename ( ( char * ) uri->path );
+			if ( ( rc = image_set_name ( image, name ) ) != 0 )
+				goto err_set_name;
+		}
 	}
+
 	return image;
+
+ err_set_name:
+	image_put ( image );
+ err_alloc:
+	return NULL;
 }
 
 /**
- * Set image URI
+ * Set image name
  *
  * @v image		Image
- * @v URI		New image URI
- *
- * If no name is set, the name will be updated to the base name of the
- * URI path (if any).
+ * @v name		New image name
+ * @ret rc		Return status code
  */
-void image_set_uri ( struct image *image, struct uri *uri ) {
-	const char *path = uri->path;
+int image_set_name ( struct image *image, const char *name ) {
+	char *name_copy;
 
-	/* Replace URI reference */
-	uri_put ( image->uri );
-	image->uri = uri_get ( uri );
+	/* Duplicate name */
+	name_copy = strdup ( name );
+	if ( ! name_copy )
+		return -ENOMEM;
 
-	/* Set name if none already specified */
-	if ( path && ( ! image->name[0] ) )
-		image_set_name ( image, basename ( ( char * ) path ) );
+	/* Replace existing name */
+	free ( image->name );
+	image->name = name_copy;
+
+	return 0;
 }
 
 /**
@@ -121,11 +160,14 @@ int image_set_cmdline ( struct image *image, const char *cmdline ) {
  */
 int register_image ( struct image *image ) {
 	static unsigned int imgindex = 0;
+	char name[8]; /* "imgXXXX" */
+	int rc;
 
 	/* Create image name if it doesn't already have one */
-	if ( ! image->name[0] ) {
-		snprintf ( image->name, sizeof ( image->name ), "img%d",
-			   imgindex++ );
+	if ( ! image->name ) {
+		snprintf ( name, sizeof ( name ), "img%d", imgindex++ );
+		if ( ( rc = image_set_name ( image, name ) ) != 0 )
+			return rc;
 	}
 
 	/* Avoid ending up with multiple "selected" images on
@@ -228,6 +270,12 @@ int image_exec ( struct image *image ) {
 	if ( ( rc = image_select ( image ) ) != 0 )
 		return rc;
 
+	/* Check that image is trusted (if applicable) */
+	if ( require_trusted_images && ! ( image->flags & IMAGE_TRUSTED ) ) {
+		DBGC ( image, "IMAGE %s is not trusted\n", image->name );
+		return -EACCES_UNTRUSTED;
+	}
+
 	/* Switch current working directory to be that of the image itself */
 	old_cwuri = uri_get ( cwuri );
 	churi ( image->uri );
@@ -241,11 +289,23 @@ int image_exec ( struct image *image ) {
 	 */
 	current_image = image_get ( image );
 
+	/* Record boot attempt */
+	syslog ( LOG_NOTICE, "Executing \"%s\"\n", image->name );
+
 	/* Try executing the image */
 	if ( ( rc = image->type->exec ( image ) ) != 0 ) {
 		DBGC ( image, "IMAGE %s could not execute: %s\n",
 		       image->name, strerror ( rc ) );
 		/* Do not return yet; we still have clean-up to do */
+	}
+
+	/* Record result of boot attempt */
+	if ( rc == 0 ) {
+		syslog ( LOG_NOTICE, "Execution of \"%s\" completed\n",
+			 image->name );
+	} else {
+		syslog ( LOG_ERR, "Execution of \"%s\" failed: %s\n",
+			 image->name, strerror ( rc ) );
 	}
 
 	/* Pick up replacement image before we drop the original
@@ -269,8 +329,8 @@ int image_exec ( struct image *image ) {
 
 	/* Tail-recurse into replacement image, if one exists */
 	if ( replacement ) {
-		DBGC ( image, "IMAGE %s replacing self with IMAGE %s\n",
-		       image->name, replacement->name );
+		DBGC ( image, "IMAGE <freed> replacing self with IMAGE %s\n",
+		       replacement->name );
 		if ( ( rc = image_exec ( replacement ) ) != 0 )
 			return rc;
 	}
@@ -354,4 +414,28 @@ struct image * image_find_selected ( void ) {
 			return image;
 	}
 	return NULL;
+}
+
+/**
+ * Change image trust requirement
+ *
+ * @v require_trusted	Require trusted images
+ * @v permanent		Make trust requirement permanent
+ * @ret rc		Return status code
+ */
+int image_set_trust ( int require_trusted, int permanent ) {
+
+	/* Update trust requirement, if permitted to do so */
+	if ( ! require_trusted_images_permanent ) {
+		require_trusted_images = require_trusted;
+		require_trusted_images_permanent = permanent;
+	}
+
+	/* Fail if we attempted to change the trust requirement but
+	 * were not permitted to do so.
+	 */
+	if ( require_trusted_images != require_trusted )
+		return -EACCES_PERMANENT;
+
+	return 0;
 }

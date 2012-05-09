@@ -23,6 +23,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/console.h>
 #include <ipxe/ansiesc.h>
 #include <ipxe/keymap.h>
+#include <config/console.h>
 
 #define ATTR_BOLD		0x08
 
@@ -47,6 +48,12 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ATTR_BCOL_WHITE		0x70
 
 #define ATTR_DEFAULT		ATTR_FCOL_WHITE
+
+/* Set default console usage if applicable */
+#if ! ( defined ( CONSOLE_PCBIOS ) && CONSOLE_EXPLICIT ( CONSOLE_PCBIOS ) )
+#undef CONSOLE_PCBIOS
+#define CONSOLE_PCBIOS ( CONSOLE_USAGE_ALL & ~CONSOLE_USAGE_LOG )
+#endif
 
 /** Current character attribute */
 static unsigned int bios_attr = ATTR_DEFAULT;
@@ -163,6 +170,14 @@ static void bios_putchar ( int character ) {
 					   /* Skip non-printable characters */
 					   "cmpb $0x20, %%al\n\t"
 					   "jb 1f\n\t"
+					   /* Read attribute */
+					   "movb %%al, %%cl\n\t"
+					   "movb $0x08, %%ah\n\t"
+					   "int $0x10\n\t"
+					   "xchgb %%al, %%cl\n\t"
+					   /* Skip if attribute matches */
+					   "cmpb %%ah, %%bl\n\t"
+					   "je 1f\n\t"
 					   /* Set attribute */
 					   "movw $0x0001, %%cx\n\t"
 					   "movb $0x09, %%ah\n\t"
@@ -201,6 +216,8 @@ static const char ansi_sequences[] = {
 	BIOS_KEY ( "\x4d", "[C" )	/* Right arrow */
 	BIOS_KEY ( "\x47", "[H" )	/* Home */
 	BIOS_KEY ( "\x4f", "[F" )	/* End */
+	BIOS_KEY ( "\x49", "[5~" )	/* Page up */
+	BIOS_KEY ( "\x51", "[6~" )	/* Page down */
 	BIOS_KEY ( "\x3f", "[15~" )	/* F5 */
 	BIOS_KEY ( "\x40", "[17~" )	/* F6 */
 	BIOS_KEY ( "\x41", "[18~" )	/* F7 */
@@ -311,4 +328,5 @@ struct console_driver bios_console __console_driver = {
 	.putchar = bios_putchar,
 	.getchar = bios_getchar,
 	.iskey = bios_iskey,
+	.usage = CONSOLE_PCBIOS,
 };

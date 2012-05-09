@@ -60,6 +60,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_null_sanboot	       ( ERRFILE_CORE | 0x00140000 )
 #define ERRFILE_edd		       ( ERRFILE_CORE | 0x00150000 )
 #define ERRFILE_parseopt	       ( ERRFILE_CORE | 0x00160000 )
+#define ERRFILE_test		       ( ERRFILE_CORE | 0x00170000 )
+#define ERRFILE_xferbuf		       ( ERRFILE_CORE | 0x00180000 )
 
 #define ERRFILE_eisa		     ( ERRFILE_DRIVER | 0x00000000 )
 #define ERRFILE_isa		     ( ERRFILE_DRIVER | 0x00010000 )
@@ -140,6 +142,11 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_ath9k		     ( ERRFILE_DRIVER | 0x005f0000 )
 #define ERRFILE_ath		     ( ERRFILE_DRIVER | 0x00600000 )
 #define ERRFILE_vmxnet3		     ( ERRFILE_DRIVER | 0x00610000 )
+#define ERRFILE_mii		     ( ERRFILE_DRIVER | 0x00620000 )
+#define ERRFILE_realtek		     ( ERRFILE_DRIVER | 0x00630000 )
+#define ERRFILE_skeleton	     ( ERRFILE_DRIVER | 0x00640000 )
+#define ERRFILE_intel		     ( ERRFILE_DRIVER | 0x00650000 )
+#define ERRFILE_myson		     ( ERRFILE_DRIVER | 0x00660000 )
 
 #define ERRFILE_scsi		     ( ERRFILE_DRIVER | 0x00700000 )
 #define ERRFILE_arbel		     ( ERRFILE_DRIVER | 0x00710000 )
@@ -161,7 +168,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_nullnet			( ERRFILE_NET | 0x00090000 )
 #define ERRFILE_tcp			( ERRFILE_NET | 0x000a0000 )
 #define ERRFILE_ftp			( ERRFILE_NET | 0x000b0000 )
-#define ERRFILE_http			( ERRFILE_NET | 0x000c0000 )
+#define ERRFILE_httpcore		( ERRFILE_NET | 0x000c0000 )
 #define ERRFILE_iscsi			( ERRFILE_NET | 0x000d0000 )
 #define ERRFILE_tcpip			( ERRFILE_NET | 0x000e0000 )
 #define ERRFILE_udp			( ERRFILE_NET | 0x000f0000 )
@@ -244,6 +251,15 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_nvo_cmd		      ( ERRFILE_OTHER | 0x00230000 )
 #define ERRFILE_hmac_drbg	      ( ERRFILE_OTHER | 0x00240000 )
 #define ERRFILE_drbg		      ( ERRFILE_OTHER | 0x00250000 )
+#define ERRFILE_entropy		      ( ERRFILE_OTHER | 0x00260000 )
+#define ERRFILE_rsa		      ( ERRFILE_OTHER | 0x00270000 )
+#define ERRFILE_linux_entropy	      ( ERRFILE_OTHER | 0x00280000 )
+#define ERRFILE_x509_test	      ( ERRFILE_OTHER | 0x00290000 )
+#define ERRFILE_cms		      ( ERRFILE_OTHER | 0x002a0000 )
+#define ERRFILE_imgtrust	      ( ERRFILE_OTHER | 0x002b0000 )
+#define ERRFILE_menu_ui		      ( ERRFILE_OTHER | 0x002c0000 )
+#define ERRFILE_menu_cmd	      ( ERRFILE_OTHER | 0x002d0000 )
+#define ERRFILE_validator	      ( ERRFILE_OTHER | 0x002e0000 )
 
 /** @} */
 

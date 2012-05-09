@@ -18,6 +18,7 @@
 
 FILE_LICENCE ( GPL2_OR_LATER );
 
+#include <string.h>
 #include <ipxe/net80211.h>
 #include <ipxe/crypto.h>
 #include <ipxe/hmac.h>
@@ -543,15 +544,15 @@ struct net80211_crypto tkip_crypto __net80211_crypto = {
 static void tkip_kie_mic ( const void *kck, const void *msg, size_t len,
 			   void *mic )
 {
-	struct md5_ctx md5;
+	uint8_t ctx[MD5_CTX_SIZE];
 	u8 kckb[16];
 	size_t kck_len = 16;
 
 	memcpy ( kckb, kck, kck_len );
 
-	hmac_init ( &md5_algorithm, &md5, kckb, &kck_len );
-	hmac_update ( &md5_algorithm, &md5, msg, len );
-	hmac_final ( &md5_algorithm, &md5, kckb, &kck_len, mic );
+	hmac_init ( &md5_algorithm, ctx, kckb, &kck_len );
+	hmac_update ( &md5_algorithm, ctx, msg, len );
+	hmac_final ( &md5_algorithm, ctx, kckb, &kck_len, mic );
 }
 
 /**

@@ -405,6 +405,10 @@ static struct pe_section * process_section ( bfd *bfd,
 			  EFI_IMAGE_SCN_MEM_WRITE );
 		applicable_start = &data_mid;
 		applicable_end = &data_end;
+	} else {
+		eprintf ( "Unrecognised characteristics %#lx for section %s\n",
+			  flags, section->name );
+		exit ( 1 );
 	}
 
 	/* Copy in section contents */
@@ -459,7 +463,8 @@ static struct pe_section * process_section ( bfd *bfd,
  * @v rel		Relocation entry
  * @v pe_reltab		PE relocation table to fill in
  */
-static void process_reloc ( bfd *bfd, asection *section, arelent *rel,
+static void process_reloc ( bfd *bfd __attribute__ (( unused )),
+			    asection *section, arelent *rel,
 			    struct pe_relocs **pe_reltab ) {
 	reloc_howto_type *howto = rel->howto;
 	asymbol *sym = *(rel->sym_ptr_ptr);
@@ -637,7 +642,7 @@ static void write_pe_file ( struct pe_header *pe_header,
 	for ( section = pe_sections ; section ; section = section->next ) {
 		if ( fseek ( pe, section->hdr.PointerToRawData,
 			     SEEK_SET ) != 0 ) {
-			eprintf ( "Could not seek to %lx: %s\n",
+			eprintf ( "Could not seek to %x: %s\n",
 				  section->hdr.PointerToRawData,
 				  strerror ( errno ) );
 			exit ( 1 );
@@ -786,7 +791,7 @@ int main ( int argc, char **argv ) {
 	struct options opts = {
 		.subsystem = EFI_IMAGE_SUBSYSTEM_EFI_APPLICATION,
 	};
-	unsigned int infile_index;
+	int infile_index;
 	const char *infile;
 	const char *outfile;
 

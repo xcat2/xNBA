@@ -260,19 +260,9 @@ REQUEST_EXPANDED ( CONFIG_SYMBOL );
 
 #ifndef ASSEMBLY
 
-/** printf() for debugging
- *
- * This function exists so that the DBG() macros can expand to
- * printf() calls without dragging the printf() prototype into scope.
- *
- * As far as the compiler is concerned, dbg_printf() and printf() are
- * completely unrelated calls; it's only at the assembly stage that
- * references to the dbg_printf symbol are collapsed into references
- * to the printf symbol.
- */
-extern int __attribute__ (( format ( printf, 1, 2 ) )) 
-dbg_printf ( const char *fmt, ... ) asm ( "printf" );
-
+/** printf() for debugging */
+extern void __attribute__ (( format ( printf, 1, 2 ) ))
+dbg_printf ( const char *fmt, ... );
 extern void dbg_autocolourise ( unsigned long id );
 extern void dbg_decolourise ( void );
 extern void dbg_hex_dump_da ( unsigned long dispaddr,
@@ -339,6 +329,7 @@ int __debug_disable;
 				unsigned long ul;		\
 				typeof ( dispaddr ) raw;	\
 			} da;					\
+			da.ul = 0;				\
 			da.raw = dispaddr;			\
 			dbg_hex_dump_da ( da.ul, data, len );	\
 		}						\
@@ -370,6 +361,7 @@ int __debug_disable;
 				unsigned long ul;		\
 				typeof ( dispaddr ) raw;	\
 			} da;					\
+			da.ul = 0;				\
 			da.raw = dispaddr;			\
 			dbg_md5_da ( da.ul, data, len );	\
 		}						\
@@ -421,6 +413,7 @@ int __debug_disable;
 				unsigned long ul;		\
 				typeof ( id ) raw;		\
 			} dbg_stream;				\
+			dbg_stream.ul = 0;			\
 			dbg_stream.raw = id;			\
 			dbg_autocolourise ( dbg_stream.ul );	\
 		}						\

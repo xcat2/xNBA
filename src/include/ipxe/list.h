@@ -325,6 +325,19 @@ static inline void list_splice_tail_init ( struct list_head *list,
 	  list_entry ( (list)->next, type, member ) )
 
 /**
+ * Get the container of the last entry in a list
+ *
+ * @v list		List head
+ * @v type		Containing type
+ * @v member		Name of list field within containing type
+ * @ret first		First list entry, or NULL
+ */
+#define list_last_entry( list, type, member )		\
+	( list_empty ( (list) ) ?			\
+	  ( type * ) NULL :				\
+	  list_entry ( (list)->prev, type, member ) )
+
+/**
  * Iterate over a list
  *
  * @v pos		Iterator
@@ -377,6 +390,32 @@ static inline void list_splice_tail_init ( struct list_head *list,
 	      &pos->member != (head);					      \
 	      pos = tmp,						      \
 	      tmp = list_entry ( tmp->member.next, typeof ( *tmp ), member ) )
+
+/**
+ * Iterate over entries in a list, starting after current position
+ *
+ * @v pos		Iterator
+ * @v head		List head
+ * @v member		Name of list field within iterator's type
+ */
+#define list_for_each_entry_continue( pos, head, member )		      \
+	for ( list_check ( (head) ),					      \
+	      pos = list_entry ( pos->member.next, typeof ( *pos ), member ); \
+	      &pos->member != (head);					      \
+	      pos = list_entry ( pos->member.next, typeof ( *pos ), member ) )
+
+/**
+ * Iterate over entries in a list in reverse, starting after current position
+ *
+ * @v pos		Iterator
+ * @v head		List head
+ * @v member		Name of list field within iterator's type
+ */
+#define list_for_each_entry_continue_reverse( pos, head, member )	      \
+	for ( list_check ( (head) ),					      \
+	      pos = list_entry ( pos->member.prev, typeof ( *pos ), member ); \
+	      &pos->member != (head);					      \
+	      pos = list_entry ( pos->member.prev, typeof ( *pos ), member ) )
 
 /**
  * Test if list contains a specified entry

@@ -13,7 +13,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <stddef.h>
 
 struct net_device;
-struct image;
+struct menu;
 
 /** A command-line option descriptor */
 struct option_descriptor {
@@ -117,8 +117,9 @@ struct command_descriptor {
 extern int parse_string ( const char *text, const char **value );
 extern int parse_integer ( const char *text, unsigned int *value );
 extern int parse_netdev ( const char *text, struct net_device **netdev );
-extern int parse_image ( const char *text, struct image **image );
+extern int parse_menu ( const char *text, struct menu **menu );
 extern int parse_flag ( const char *text __unused, int *flag );
+extern int parse_key ( const char *text, unsigned int *key );
 extern void print_usage ( struct command_descriptor *cmd, char **argv );
 extern int reparse_options ( int argc, char **argv,
 			     struct command_descriptor *cmd, void *opts );

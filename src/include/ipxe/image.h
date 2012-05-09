@@ -29,7 +29,7 @@ struct image {
 	/** URI of image */
 	struct uri *uri;
 	/** Name */
-	char name[16];
+	char *name;
 	/** Flags */
 	unsigned int flags;
 
@@ -63,6 +63,9 @@ struct image {
 
 /** Image is selected for execution */
 #define IMAGE_SELECTED 0x0002
+
+/** Image is trusted */
+#define IMAGE_TRUSTED 0x0004
 
 /** An executable image type */
 struct image_type {
@@ -119,6 +122,10 @@ extern struct image *current_image;
 #define for_each_image( image ) \
 	list_for_each_entry ( (image), &images, list )
 
+/** Iterate over all registered images, safe against deletion */
+#define for_each_image_safe( image, tmp ) \
+	list_for_each_entry_safe ( (image), (tmp), &images, list )
+
 /**
  * Test for existence of images
  *
@@ -137,8 +144,8 @@ static inline struct image * first_image ( void ) {
 	return list_first_entry ( &images, struct image, list );
 }
 
-extern struct image * alloc_image ( void );
-extern void image_set_uri ( struct image *image, struct uri *uri );
+extern struct image * alloc_image ( struct uri *uri );
+extern int image_set_name ( struct image *image, const char *name );
 extern int image_set_cmdline ( struct image *image, const char *cmdline );
 extern int register_image ( struct image *image );
 extern void unregister_image ( struct image *image );
@@ -148,6 +155,7 @@ extern int image_exec ( struct image *image );
 extern int image_replace ( struct image *replacement );
 extern int image_select ( struct image *image );
 extern struct image * image_find_selected ( void );
+extern int image_set_trust ( int require_trusted, int permanent );
 
 /**
  * Increment reference count on an image
@@ -170,15 +178,30 @@ static inline void image_put ( struct image *image ) {
 }
 
 /**
- * Set image name
+ * Clear image command line
  *
  * @v image		Image
- * @v name		New image name
- * @ret rc		Return status code
  */
-static inline int image_set_name ( struct image *image, const char *name ) {
-	strncpy ( image->name, name, ( sizeof ( image->name ) - 1 ) );
-	return 0;
+static inline void image_clear_cmdline ( struct image *image ) {
+	image_set_cmdline ( image, NULL );
+}
+
+/**
+ * Set image as trusted
+ *
+ * @v image		Image
+ */
+static inline void image_trust ( struct image *image ) {
+	image->flags |= IMAGE_TRUSTED;
+}
+
+/**
+ * Set image as untrusted
+ *
+ * @v image		Image
+ */
+static inline void image_untrust ( struct image *image ) {
+	image->flags &= ~IMAGE_TRUSTED;
 }
 
 #endif /* _IPXE_IMAGE_H */

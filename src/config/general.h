@@ -58,7 +58,6 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define	DOWNLOAD_PROTO_HTTP	/* Hypertext Transfer Protocol */
 #define DOWNLOAD_PROTO_HTTPS	/* Secure Hypertext Transfer Protocol */
 #undef	DOWNLOAD_PROTO_FTP	/* File Transfer Protocol */
-#undef	DOWNLOAD_PROTO_TFTM	/* Multicast Trivial File Transfer Protocol */
 #undef	DOWNLOAD_PROTO_SLAM	/* Scalable Local Area Multicast */
 
 /*
@@ -95,10 +94,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 #undef	IMAGE_NBI		/* NBI image support */
 //#define	IMAGE_ELF		/* ELF image support */
-#undef	IMAGE_FREEBSD		/* FreeBSD kernel image support */
 #undef	IMAGE_MULTIBOOT		/* MultiBoot image support */
-#undef	IMAGE_AOUT		/* a.out image support */
-#undef	IMAGE_WINCE		/* WinCE image support */
 //#define	IMAGE_PXE		/* PXE image support */
 //#define	IMAGE_SCRIPT		/* iPXE script image support */
 //#define	IMAGE_BZIMAGE		/* Linux bzImage image support */
@@ -119,6 +115,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define IMAGE_CMD		/* Image management commands */
 #undef DHCP_CMD		/* DHCP management commands */
 #define SANBOOT_CMD		/* SAN boot commands */
+#undef MENU_CMD		/* Menu commands */
 #undef LOGIN_CMD		/* Login command */
 #undef	TIME_CMD		/* Time commands */
 #undef	DIGEST_CMD		/* Image crypto digest commands */
@@ -126,6 +123,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #undef	VLAN_CMD		/* VLAN commands */
 #undef	PXE_CMD			/* PXE commands */
 #undef	REBOOT_CMD		/* Reboot command */
+#define IMAGE_TRUST_CMD	/* Image trust management commands */
 
 /*
  * ROM-specific options
