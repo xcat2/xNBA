@@ -13,15 +13,19 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <errno.h>
+#include <time.h>
 #include <ipxe/tables.h>
 #include <ipxe/asn1.h>
 
@@ -52,6 +56,26 @@ FILE_LICENCE ( GPL2_OR_LATER );
 	__einfo_error ( EINFO_EINVAL_ASN1_INTEGER )
 #define EINFO_EINVAL_ASN1_INTEGER \
 	__einfo_uniqify ( EINFO_EINVAL, 0x04, "Invalid integer" )
+#define EINVAL_ASN1_TIME \
+	__einfo_error ( EINFO_EINVAL_ASN1_TIME )
+#define EINFO_EINVAL_ASN1_TIME \
+	__einfo_uniqify ( EINFO_EINVAL, 0x05, "Invalid time" )
+#define EINVAL_ASN1_ALGORITHM \
+	__einfo_error ( EINFO_EINVAL_ASN1_ALGORITHM )
+#define EINFO_EINVAL_ASN1_ALGORITHM \
+	__einfo_uniqify ( EINFO_EINVAL, 0x06, "Invalid algorithm" )
+#define EINVAL_BIT_STRING \
+	__einfo_error ( EINFO_EINVAL_BIT_STRING )
+#define EINFO_EINVAL_BIT_STRING \
+	__einfo_uniqify ( EINFO_EINVAL, 0x07, "Invalid bit string" )
+#define ENOTSUP_ALGORITHM \
+	__einfo_error ( EINFO_ENOTSUP_ALGORITHM )
+#define EINFO_ENOTSUP_ALGORITHM \
+	__einfo_uniqify ( EINFO_ENOTSUP, 0x01, "Unsupported algorithm" )
+#define ENOTTY_ALGORITHM \
+	__einfo_error ( EINFO_ENOTTY_ALGORITHM )
+#define EINFO_ENOTTY_ALGORITHM \
+	__einfo_uniqify ( EINFO_ENOTTY, 0x01, "Inappropriate algorithm" )
 
 /**
  * Invalidate ASN.1 object cursor
@@ -277,7 +301,9 @@ int asn1_shrink_any ( struct asn1_cursor *cursor ) {
  */
 int asn1_boolean ( const struct asn1_cursor *cursor ) {
 	struct asn1_cursor contents;
-	const struct asn1_boolean *boolean;
+	const struct {
+		uint8_t value;
+	} __attribute__ (( packed )) *boolean;
 
 	/* Enter boolean */
 	memcpy ( &contents, cursor, sizeof ( contents ) );
@@ -330,6 +356,87 @@ int asn1_integer ( const struct asn1_cursor *cursor, int *value ) {
 }
 
 /**
+ * Parse ASN.1 bit string
+ *
+ * @v cursor		ASN.1 cursor
+ * @v bits		Bit string to fill in
+ * @ret rc		Return status code
+ */
+int asn1_bit_string ( const struct asn1_cursor *cursor,
+		      struct asn1_bit_string *bits ) {
+	struct asn1_cursor contents;
+	const struct {
+		uint8_t unused;
+		uint8_t data[0];
+	} __attribute__ (( packed )) *bit_string;
+	size_t len;
+	unsigned int unused;
+	uint8_t unused_mask;
+	const uint8_t *last;
+	int rc;
+
+	/* Enter bit string */
+	memcpy ( &contents, cursor, sizeof ( contents ) );
+	if ( ( rc = asn1_enter ( &contents, ASN1_BIT_STRING ) ) != 0 ) {
+		DBGC ( cursor, "ASN1 %p cannot locate bit string:\n", cursor );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return rc;
+	}
+
+	/* Validity checks */
+	if ( contents.len < sizeof ( *bit_string ) ) {
+		DBGC ( cursor, "ASN1 %p invalid bit string:\n", cursor );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -EINVAL_BIT_STRING;
+	}
+	bit_string = contents.data;
+	len = ( contents.len - offsetof ( typeof ( *bit_string ), data ) );
+	unused = bit_string->unused;
+	unused_mask = ( 0xff >> ( 8 - unused ) );
+	last = ( bit_string->data + len - 1 );
+	if ( ( unused >= 8 ) ||
+	     ( ( unused > 0 ) && ( len == 0 ) ) ||
+	     ( ( *last & unused_mask ) != 0 ) ) {
+		DBGC ( cursor, "ASN1 %p invalid bit string:\n", cursor );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -EINVAL_BIT_STRING;
+	}
+
+	/* Populate bit string */
+	bits->data = &bit_string->data;
+	bits->len = len;
+	bits->unused = unused;
+
+	return 0;
+}
+
+/**
+ * Parse ASN.1 bit string that must be an integral number of bytes
+ *
+ * @v cursor		ASN.1 cursor
+ * @v bits		Bit string to fill in
+ * @ret rc		Return status code
+ */
+int asn1_integral_bit_string ( const struct asn1_cursor *cursor,
+			       struct asn1_bit_string *bits ) {
+	int rc;
+
+	/* Parse bit string */
+	if ( ( rc = asn1_bit_string ( cursor, bits ) ) != 0 )
+		return rc;
+
+	/* Check that there are no unused bits at end of string */
+	if ( bits->unused ) {
+		DBGC ( cursor, "ASN1 %p invalid integral bit string:\n",
+		       cursor );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -EINVAL_BIT_STRING;
+	}
+
+	return 0;
+}
+
+/**
  * Compare two ASN.1 objects
  *
  * @v cursor1		ASN.1 object cursor
@@ -371,11 +478,12 @@ asn1_find_algorithm ( const struct asn1_cursor *cursor ) {
  * Parse ASN.1 OID-identified algorithm
  *
  * @v cursor		ASN.1 object cursor
- * @ret algorithm	Algorithm, or NULL
+ * @ret algorithm	Algorithm
+ * @ret rc		Return status code
  */
-struct asn1_algorithm * asn1_algorithm ( const struct asn1_cursor *cursor ) {
+int asn1_algorithm ( const struct asn1_cursor *cursor,
+		     struct asn1_algorithm **algorithm ) {
 	struct asn1_cursor contents;
-	struct asn1_algorithm *algorithm;
 	int rc;
 
 	/* Enter signatureAlgorithm */
@@ -387,16 +495,353 @@ struct asn1_algorithm * asn1_algorithm ( const struct asn1_cursor *cursor ) {
 		DBGC ( cursor, "ASN1 %p cannot locate algorithm OID:\n",
 		       cursor );
 		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
-		return NULL;
+		return -EINVAL_ASN1_ALGORITHM;
 	}
 
 	/* Identify algorithm */
-	algorithm = asn1_find_algorithm ( &contents );
-	if ( ! algorithm ) {
+	*algorithm = asn1_find_algorithm ( &contents );
+	if ( ! *algorithm ) {
 		DBGC ( cursor, "ASN1 %p unrecognised algorithm:\n", cursor );
 		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
-		return NULL;
+		return -ENOTSUP_ALGORITHM;
 	}
 
-	return algorithm;
+	return 0;
+}
+
+/**
+ * Parse ASN.1 OID-identified public-key algorithm
+ *
+ * @v cursor		ASN.1 object cursor
+ * @ret algorithm	Algorithm
+ * @ret rc		Return status code
+ */
+int asn1_pubkey_algorithm ( const struct asn1_cursor *cursor,
+			    struct asn1_algorithm **algorithm ) {
+	int rc;
+
+	/* Parse algorithm */
+	if ( ( rc = asn1_algorithm ( cursor, algorithm ) ) != 0 )
+		return rc;
+
+	/* Check algorithm has a public key */
+	if ( ! (*algorithm)->pubkey ) {
+		DBGC ( cursor, "ASN1 %p algorithm %s is not a public-key "
+		       "algorithm:\n", cursor, (*algorithm)->name );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -ENOTTY_ALGORITHM;
+	}
+
+	return 0;
+}
+
+/**
+ * Parse ASN.1 OID-identified digest algorithm
+ *
+ * @v cursor		ASN.1 object cursor
+ * @ret algorithm	Algorithm
+ * @ret rc		Return status code
+ */
+int asn1_digest_algorithm ( const struct asn1_cursor *cursor,
+			    struct asn1_algorithm **algorithm ) {
+	int rc;
+
+	/* Parse algorithm */
+	if ( ( rc = asn1_algorithm ( cursor, algorithm ) ) != 0 )
+		return rc;
+
+	/* Check algorithm has a digest */
+	if ( ! (*algorithm)->digest ) {
+		DBGC ( cursor, "ASN1 %p algorithm %s is not a digest "
+		       "algorithm:\n", cursor, (*algorithm)->name );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -ENOTTY_ALGORITHM;
+	}
+
+	return 0;
+}
+
+/**
+ * Parse ASN.1 OID-identified signature algorithm
+ *
+ * @v cursor		ASN.1 object cursor
+ * @ret algorithm	Algorithm
+ * @ret rc		Return status code
+ */
+int asn1_signature_algorithm ( const struct asn1_cursor *cursor,
+			       struct asn1_algorithm **algorithm ) {
+	int rc;
+
+	/* Parse algorithm */
+	if ( ( rc = asn1_algorithm ( cursor, algorithm ) ) != 0 )
+		return rc;
+
+	/* Check algorithm has a public key */
+	if ( ! (*algorithm)->pubkey ) {
+		DBGC ( cursor, "ASN1 %p algorithm %s is not a signature "
+		       "algorithm:\n", cursor, (*algorithm)->name );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -ENOTTY_ALGORITHM;
+	}
+
+	/* Check algorithm has a digest */
+	if ( ! (*algorithm)->digest ) {
+		DBGC ( cursor, "ASN1 %p algorithm %s is not a signature "
+		       "algorithm:\n", cursor, (*algorithm)->name );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -ENOTTY_ALGORITHM;
+	}
+
+	return 0;
+}
+
+/**
+ * Parse ASN.1 GeneralizedTime
+ *
+ * @v cursor		ASN.1 cursor
+ * @v time		Time to fill in
+ * @ret rc		Return status code
+ *
+ * RFC 5280 section 4.1.2.5 places several restrictions on the allowed
+ * formats for UTCTime and GeneralizedTime, and mandates the
+ * interpretation of centuryless year values.
+ */
+int asn1_generalized_time ( const struct asn1_cursor *cursor, time_t *time ) {
+	struct asn1_cursor contents;
+	unsigned int have_century;
+	unsigned int type;
+	union {
+		struct {
+			uint8_t century;
+			uint8_t year;
+			uint8_t month;
+			uint8_t day;
+			uint8_t hour;
+			uint8_t minute;
+			uint8_t second;
+		} __attribute__ (( packed )) named;
+		uint8_t raw[7];
+	} pairs;
+	struct tm tm;
+	const uint8_t *data;
+	size_t remaining;
+	unsigned int tens;
+	unsigned int units;
+	unsigned int i;
+	int rc;
+
+	/* Determine time format utcTime/generalizedTime */
+	memcpy ( &contents, cursor, sizeof ( contents ) );
+	type = asn1_type ( &contents );
+	switch ( type ) {
+	case ASN1_UTC_TIME:
+		have_century = 0;
+		break;
+	case ASN1_GENERALIZED_TIME:
+		have_century = 1;
+		break;
+	default:
+		DBGC ( cursor, "ASN1 %p invalid time type %02x\n",
+		       cursor, type );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -EINVAL_ASN1_TIME;
+	}
+
+	/* Enter utcTime/generalizedTime */
+	if ( ( rc = asn1_enter ( &contents, type ) ) != 0 ) {
+		DBGC ( cursor, "ASN1 %p cannot locate %s time:\n", cursor,
+		       ( ( type == ASN1_UTC_TIME ) ? "UTC" : "generalized" ) );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return rc;
+	}
+
+	/* Parse digit string a pair at a time */
+	memset ( &pairs, 0, sizeof ( pairs ) );
+	data = contents.data;
+	remaining = contents.len;
+	for ( i = ( have_century ? 0 : 1 ) ; i < sizeof ( pairs.raw ) ; i++ ) {
+		if ( remaining < 2 ) {
+			/* Some certificates violate the X.509 RFC by
+			 * omitting the "seconds" value.
+			 */
+			if ( i == ( sizeof ( pairs.raw ) - 1 ) )
+				break;
+			DBGC ( cursor, "ASN1 %p invalid time:\n", cursor );
+			DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+			return -EINVAL_ASN1_TIME;
+		}
+		tens = data[0];
+		units = data[1];
+		if ( ! ( isdigit ( tens ) && isdigit ( units ) ) ) {
+			DBGC ( cursor, "ASN1 %p invalid time:\n", cursor );
+			DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+			return -EINVAL_ASN1_TIME;
+		}
+		pairs.raw[i] = ( ( 10 * ( tens - '0' ) ) + ( units - '0' ) );
+		data += 2;
+		remaining -= 2;
+	}
+
+	/* Determine century if applicable */
+	if ( ! have_century )
+		pairs.named.century = ( ( pairs.named.year >= 50 ) ? 19 : 20 );
+
+	/* Check for trailing "Z" */
+	if ( ( remaining != 1 ) || ( data[0] != 'Z' ) ) {
+		DBGC ( cursor, "ASN1 %p invalid time:\n", cursor );
+		DBGC_HDA ( cursor, 0, cursor->data, cursor->len );
+		return -EINVAL_ASN1_TIME;
+	}
+
+	/* Fill in time */
+	tm.tm_year = ( ( ( pairs.named.century - 19 ) * 100 ) +
+		       pairs.named.year );
+	tm.tm_mon = ( pairs.named.month - 1 );
+	tm.tm_mday = pairs.named.day;
+	tm.tm_hour = pairs.named.hour;
+	tm.tm_min = pairs.named.minute;
+	tm.tm_sec = pairs.named.second;
+
+	/* Convert to seconds since the Epoch */
+	*time = mktime ( &tm );
+
+	return 0;
+}
+
+/**
+ * Construct ASN.1 header
+ *
+ * @v header		ASN.1 builder header
+ * @v type		Type
+ * @v len		Content length
+ * @ret header_len	Header length
+ */
+static size_t asn1_header ( struct asn1_builder_header *header,
+			    unsigned int type, size_t len ) {
+	unsigned int header_len = 2;
+	unsigned int len_len = 0;
+	size_t temp;
+
+	/* Construct header */
+	header->type = type;
+	if ( len < 0x80 ) {
+		header->length[0] = len;
+	} else {
+		for ( temp = len ; temp ; temp >>= 8 )
+			len_len++;
+		header->length[0] = ( 0x80 | len_len );
+		header_len += len_len;
+		for ( temp = len ; temp ; temp >>= 8 )
+			header->length[len_len--] = ( temp & 0xff );
+	}
+
+	return header_len;
+}
+
+/**
+ * Grow ASN.1 builder
+ *
+ * @v builder		ASN.1 builder
+ * @v extra		Extra space to prepend
+ * @ret rc		Return status code
+ */
+static int asn1_grow ( struct asn1_builder *builder, size_t extra ) {
+	size_t new_len;
+	void *new;
+
+	/* As with the ASN1 parsing functions, make errors permanent */
+	if ( builder->len && ! builder->data )
+		return -ENOMEM;
+
+	/* Reallocate data buffer */
+	new_len = ( builder->len + extra );
+	new = realloc ( builder->data, new_len );
+	if ( ! new ) {
+		free ( builder->data );
+		builder->data = NULL;
+		return -ENOMEM;
+	}
+	builder->data = new;
+
+	/* Move existing data to end of buffer */
+	memmove ( ( builder->data + extra ), builder->data, builder->len );
+	builder->len = new_len;
+
+	return 0;
+}
+
+/**
+ * Prepend raw data to ASN.1 builder
+ *
+ * @v builder		ASN.1 builder
+ * @v data		Data to prepend
+ * @v len		Length of data to prepend
+ * @ret rc		Return status code
+ */
+int asn1_prepend_raw ( struct asn1_builder *builder, const void *data,
+		       size_t len ) {
+	int rc;
+
+	/* Grow buffer */
+	if ( ( rc = asn1_grow ( builder, len ) ) != 0 )
+		return rc;
+
+	/* Populate data buffer */
+	memcpy ( builder->data, data, len );
+
+	return 0;
+}
+
+/**
+ * Prepend data to ASN.1 builder
+ *
+ * @v builder		ASN.1 builder
+ * @v type		Type
+ * @v data		Data to prepend
+ * @v len		Length of data to prepend
+ * @ret rc		Return status code
+ */
+int asn1_prepend ( struct asn1_builder *builder, unsigned int type,
+		   const void *data, size_t len ) {
+	struct asn1_builder_header header;
+	size_t header_len;
+	int rc;
+
+	/* Construct header */
+	header_len = asn1_header ( &header, type, len );
+
+	/* Grow buffer */
+	if ( ( rc = asn1_grow ( builder, header_len + len ) ) != 0 )
+		return rc;
+
+	/* Populate data buffer */
+	memcpy ( builder->data, &header, header_len );
+	memcpy ( ( builder->data + header_len ), data, len );
+
+	return 0;
+}
+
+/**
+ * Wrap ASN.1 builder
+ *
+ * @v builder		ASN.1 builder
+ * @v type		Type
+ * @ret rc		Return status code
+ */
+int asn1_wrap ( struct asn1_builder *builder, unsigned int type ) {
+	struct asn1_builder_header header;
+	size_t header_len;
+	int rc;
+
+	/* Construct header */
+	header_len = asn1_header ( &header, type, builder->len );
+
+	/* Grow buffer */
+	if ( ( rc = asn1_grow ( builder, header_len ) ) != 0 )
+		return rc;
+
+	/* Populate data buffer */
+	memcpy ( builder->data, &header, header_len );
+
+	return 0;
 }

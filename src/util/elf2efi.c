@@ -13,10 +13,13 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 #define _GNU_SOURCE
+#define PACKAGE "elf2efi"
+#define PACKAGE_VERSION "1"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -613,8 +616,11 @@ static void write_pe_file ( struct pe_header *pe_header,
 	struct pe_section *section;
 	unsigned long fpos = 0;
 
+	/* Align length of headers */
+	fpos = pe_header->nt.OptionalHeader.SizeOfHeaders =
+		efi_file_align ( pe_header->nt.OptionalHeader.SizeOfHeaders );
+
 	/* Assign raw data pointers */
-	fpos = efi_file_align ( pe_header->nt.OptionalHeader.SizeOfHeaders );
 	for ( section = pe_sections ; section ; section = section->next ) {
 		if ( section->hdr.SizeOfRawData ) {
 			section->hdr.PointerToRawData = fpos;

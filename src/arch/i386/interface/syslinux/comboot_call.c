@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 /**
@@ -38,12 +39,13 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/serial.h>
 #include <ipxe/init.h>
 #include <ipxe/image.h>
+#include <ipxe/version.h>
 #include <usr/imgmgmt.h>
 #include "config/console.h"
 #include "config/serial.h"
 
 /** The "SYSLINUX" version string */
-static char __data16_array ( syslinux_version, [] ) = "\r\niPXE " VERSION;
+static char __bss16_array ( syslinux_version, [32] );
 #define syslinux_version __use_data16 ( syslinux_version )
 
 /** The "SYSLINUX" copyright string */
@@ -324,6 +326,10 @@ static __asmcall void int22 ( struct i386_all_regs *ix86 ) {
 
 		/* SYSLINUX derivative ID */
 		ix86->regs.dl = BZI_LOADER_TYPE_IPXE;
+
+		/* SYSLINUX version */
+		snprintf ( syslinux_version, sizeof ( syslinux_version ),
+			   "\r\niPXE %s", product_version );
 
 		/* SYSLINUX version and copyright strings */
 		ix86->segs.es = rm_ds;

@@ -21,7 +21,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_ONLY );
@@ -782,7 +783,7 @@ static void sky2_mac_init(struct sky2_hw *hw, unsigned port)
 	sky2_write8(hw, SK_REG(port, TX_GMF_CTRL_T), GMF_RST_CLR);
 	sky2_write16(hw, SK_REG(port, TX_GMF_CTRL_T), GMF_OPER_ON);
 
-	/* On chips without ram buffer, pause is controled by MAC level */
+	/* On chips without ram buffer, pause is controlled by MAC level */
 	if (!(hw->flags & SKY2_HW_RAM_BUFFER)) {
 		sky2_write8(hw, SK_REG(port, RX_GMF_LP_THR), 768/8);
 		sky2_write8(hw, SK_REG(port, RX_GMF_UP_THR), 1024/8);
@@ -2334,7 +2335,7 @@ static int sky2_probe(struct pci_device *pdev)
 			sky2_show_addr(dev1);
 	}
 
-	pci_set_drvdata(pdev, dev);
+	pci_set_drvdata(pdev, hw);
 
 	return 0;
 

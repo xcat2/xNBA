@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -62,6 +63,10 @@ struct e820_entry {
 static struct e820_entry __bss16 ( e820buf );
 #define e820buf __use_data16 ( e820buf )
 
+/** We are running during POST; inhibit INT 15,e820 and INT 15,e801 */
+uint8_t __bss16 ( memmap_post );
+#define memmap_post __use_data16 ( memmap_post )
+
 /**
  * Get size of extended memory via INT 15,e801
  *
@@ -72,6 +77,12 @@ static unsigned int extmemsize_e801 ( void ) {
 	uint16_t confmem_1m_to_16m_k, confmem_16m_plus_64k;
 	unsigned int flags;
 	unsigned int extmem;
+
+	/* Inhibit INT 15,e801 during POST */
+	if ( memmap_post ) {
+		DBG ( "INT 15,e801 not available during POST\n" );
+		return 0;
+	}
 
 	__asm__ __volatile__ ( REAL_CODE ( "stc\n\t"
 					   "int $0x15\n\t"
@@ -162,6 +173,12 @@ static int meme820 ( struct memory_map *memmap ) {
 	size_t size;
 	unsigned int flags;
 	unsigned int discard_D;
+
+	/* Inhibit INT 15,e820 during POST */
+	if ( memmap_post ) {
+		DBG ( "INT 15,e820 not available during POST\n" );
+		return -ENOTTY;
+	}
 
 	/* Clear the E820 buffer.  Do this once before starting,
 	 * rather than on each call; some BIOSes rely on the contents

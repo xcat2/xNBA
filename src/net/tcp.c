@@ -10,6 +10,7 @@
 #include <ipxe/init.h>
 #include <ipxe/retry.h>
 #include <ipxe/refcnt.h>
+#include <ipxe/pending.h>
 #include <ipxe/xfer.h>
 #include <ipxe/open.h>
 #include <ipxe/uri.h>
@@ -86,6 +87,18 @@ struct tcp_connection {
 	 * Equivalent to TS.Recent in RFC 1323 terminology.
 	 */
 	uint32_t ts_recent;
+	/** Send window scale
+	 *
+	 * Equivalent to Snd.Wind.Scale in RFC 1323 terminology
+	 */
+	uint8_t snd_win_scale;
+	/** Receive window scale
+	 *
+	 * Equivalent to Rcv.Wind.Scale in RFC 1323 terminology
+	 */
+	uint8_t rcv_win_scale;
+	/** Maximum receive window */
+	uint32_t max_rcv_win;
 
 	/** Transmit queue */
 	struct list_head tx_queue;
@@ -95,6 +108,11 @@ struct tcp_connection {
 	struct retry_timer timer;
 	/** Shutdown (TIME_WAIT) timer */
 	struct retry_timer wait;
+
+	/** Pending operations for SYN and FIN */
+	struct pending_operation pending_flags;
+	/** Pending operations for transmit queue */
+	struct pending_operation pending_data;
 };
 
 /** TCP flags */
@@ -279,6 +297,7 @@ static int tcp_open ( struct interface *xfer, struct sockaddr *peer,
 	tcp->tcp_state = TCP_STATE_SENT ( TCP_SYN );
 	tcp_dump_state ( tcp );
 	tcp->snd_seq = random();
+	tcp->max_rcv_win = TCP_MAX_WINDOW_SIZE;
 	INIT_LIST_HEAD ( &tcp->tx_queue );
 	INIT_LIST_HEAD ( &tcp->rx_queue );
 	memcpy ( &tcp->peer, st_peer, sizeof ( tcp->peer ) );
@@ -290,6 +309,9 @@ static int tcp_open ( struct interface *xfer, struct sockaddr *peer,
 
 	/* Start timer to initiate SYN */
 	start_timer_nodelay ( &tcp->timer );
+
+	/* Add a pending operation for the SYN */
+	pending_get ( &tcp->pending_flags );
 
 	/* Attach parent interface, transfer reference to connection
 	 * list and return
@@ -340,7 +362,13 @@ static void tcp_close ( struct tcp_connection *tcp, int rc ) {
 		list_for_each_entry_safe ( iobuf, tmp, &tcp->tx_queue, list ) {
 			list_del ( &iobuf->list );
 			free_iob ( iobuf );
+			pending_put ( &tcp->pending_data );
 		}
+		assert ( ! is_pending ( &tcp->pending_data ) );
+
+		/* Remove pending operations for SYN and FIN, if applicable */
+		pending_put ( &tcp->pending_flags );
+		pending_put ( &tcp->pending_flags );
 
 		/* Remove from list and drop reference */
 		stop_timer ( &tcp->timer );
@@ -359,9 +387,14 @@ static void tcp_close ( struct tcp_connection *tcp, int rc ) {
 		tcp_rx_ack ( tcp, ( tcp->snd_seq + 1 ), 0 );
 
 	/* If we have no data remaining to send, start sending FIN */
-	if ( list_empty ( &tcp->tx_queue ) ) {
+	if ( list_empty ( &tcp->tx_queue ) &&
+	     ! ( tcp->tcp_state & TCP_STATE_SENT ( TCP_FIN ) ) ) {
+
 		tcp->tcp_state |= TCP_STATE_SENT ( TCP_FIN );
 		tcp_dump_state ( tcp );
+
+		/* Add a pending operation for the FIN */
+		pending_get ( &tcp->pending_flags );
 	}
 }
 
@@ -446,6 +479,7 @@ static size_t tcp_process_tx_queue ( struct tcp_connection *tcp, size_t max_len,
 			if ( ! iob_len ( iobuf ) ) {
 				list_del ( &iobuf->list );
 				free_iob ( iobuf );
+				pending_put ( &tcp->pending_data );
 			}
 		}
 		len += frag_len;
@@ -469,6 +503,7 @@ static int tcp_xmit ( struct tcp_connection *tcp ) {
 	struct io_buffer *iobuf;
 	struct tcp_header *tcphdr;
 	struct tcp_mss_option *mssopt;
+	struct tcp_window_scale_padded_option *wsopt;
 	struct tcp_timestamp_padded_option *tsopt;
 	void *payload;
 	unsigned int flags;
@@ -476,6 +511,7 @@ static int tcp_xmit ( struct tcp_connection *tcp ) {
 	uint32_t seq_len;
 	uint32_t app_win;
 	uint32_t max_rcv_win;
+	uint32_t max_representable_win;
 	int rc;
 
 	/* If retransmission timer is already running, do nothing */
@@ -524,12 +560,13 @@ static int tcp_xmit ( struct tcp_connection *tcp ) {
 	tcp_process_tx_queue ( tcp, len, iobuf, 0 );
 
 	/* Expand receive window if possible */
-	max_rcv_win = ( ( freemem * 3 ) / 4 );
-	if ( max_rcv_win > TCP_MAX_WINDOW_SIZE )
-		max_rcv_win = TCP_MAX_WINDOW_SIZE;
+	max_rcv_win = tcp->max_rcv_win;
 	app_win = xfer_window ( &tcp->xfer );
 	if ( max_rcv_win > app_win )
 		max_rcv_win = app_win;
+	max_representable_win = ( 0xffff << tcp->rcv_win_scale );
+	if ( max_rcv_win > max_representable_win )
+		max_rcv_win = max_representable_win;
 	max_rcv_win &= ~0x03; /* Keep everything dword-aligned */
 	if ( tcp->rcv_win < max_rcv_win )
 		tcp->rcv_win = max_rcv_win;
@@ -541,6 +578,11 @@ static int tcp_xmit ( struct tcp_connection *tcp ) {
 		mssopt->kind = TCP_OPTION_MSS;
 		mssopt->length = sizeof ( *mssopt );
 		mssopt->mss = htons ( TCP_MSS );
+		wsopt = iob_push ( iobuf, sizeof ( *wsopt ) );
+		wsopt->nop = TCP_OPTION_NOP;
+		wsopt->wsopt.kind = TCP_OPTION_WS;
+		wsopt->wsopt.length = sizeof ( wsopt->wsopt );
+		wsopt->wsopt.scale = TCP_RX_WINDOW_SCALE;
 	}
 	if ( ( flags & TCP_SYN ) || ( tcp->flags & TCP_TS_ENABLED ) ) {
 		tsopt = iob_push ( iobuf, sizeof ( *tsopt ) );
@@ -560,7 +602,7 @@ static int tcp_xmit ( struct tcp_connection *tcp ) {
 	tcphdr->ack = htonl ( tcp->rcv_ack );
 	tcphdr->hlen = ( ( payload - iobuf->data ) << 2 );
 	tcphdr->flags = flags;
-	tcphdr->win = htons ( tcp->rcv_win );
+	tcphdr->win = htons ( tcp->rcv_win >> tcp->rcv_win_scale );
 	tcphdr->csum = tcpip_chksum ( iobuf->data, iob_len ( iobuf ) );
 
 	/* Dump header */
@@ -673,7 +715,7 @@ static int tcp_xmit_reset ( struct tcp_connection *tcp,
 	tcphdr->ack = in_tcphdr->seq;
 	tcphdr->hlen = ( ( sizeof ( *tcphdr ) / 4 ) << 4 );
 	tcphdr->flags = ( TCP_RST | TCP_ACK );
-	tcphdr->win = htons ( TCP_MAX_WINDOW_SIZE );
+	tcphdr->win = htons ( 0 );
 	tcphdr->csum = tcpip_chksum ( iobuf->data, iob_len ( iobuf ) );
 
 	/* Dump header */
@@ -748,6 +790,9 @@ static void tcp_rx_opts ( struct tcp_connection *tcp, const void *data,
 		case TCP_OPTION_MSS:
 			options->mssopt = data;
 			break;
+		case TCP_OPTION_WS:
+			options->wsopt = data;
+			break;
 		case TCP_OPTION_TS:
 			options->tsopt = data;
 			break;
@@ -804,6 +849,10 @@ static int tcp_rx_syn ( struct tcp_connection *tcp, uint32_t seq,
 		tcp->rcv_ack = seq;
 		if ( options->tsopt )
 			tcp->flags |= TCP_TS_ENABLED;
+		if ( options->wsopt ) {
+			tcp->snd_win_scale = options->wsopt->scale;
+			tcp->rcv_win_scale = TCP_RX_WINDOW_SCALE;
+		}
 	}
 
 	/* Ignore duplicate SYN */
@@ -869,8 +918,10 @@ static int tcp_rx_ack ( struct tcp_connection *tcp, uint32_t ack,
 	len = ack_len;
 	acked_flags = ( TCP_FLAGS_SENDING ( tcp->tcp_state ) &
 			( TCP_SYN | TCP_FIN ) );
-	if ( acked_flags )
+	if ( acked_flags ) {
 		len--;
+		pending_put ( &tcp->pending_flags );
+	}
 
 	/* Update SEQ and sent counters, and window size */
 	tcp->snd_seq = ack;
@@ -885,8 +936,12 @@ static int tcp_rx_ack ( struct tcp_connection *tcp, uint32_t ack,
 		tcp->tcp_state |= TCP_STATE_ACKED ( acked_flags );
 
 	/* Start sending FIN if we've had all possible data ACKed */
-	if ( list_empty ( &tcp->tx_queue ) && ( tcp->flags & TCP_XFER_CLOSED ) )
+	if ( list_empty ( &tcp->tx_queue ) &&
+	     ( tcp->flags & TCP_XFER_CLOSED ) &&
+	     ! ( tcp->tcp_state & TCP_STATE_SENT ( TCP_FIN ) ) ) {
 		tcp->tcp_state |= TCP_STATE_SENT ( TCP_FIN );
+		pending_get ( &tcp->pending_flags );
+	}
 
 	return 0;
 }
@@ -1101,6 +1156,7 @@ static int tcp_rx ( struct io_buffer *iobuf,
 	uint16_t csum;
 	uint32_t seq;
 	uint32_t ack;
+	uint16_t raw_win;
 	uint32_t win;
 	unsigned int flags;
 	size_t len;
@@ -1141,7 +1197,7 @@ static int tcp_rx ( struct io_buffer *iobuf,
 	tcp = tcp_demux ( ntohs ( tcphdr->dest ) );
 	seq = ntohl ( tcphdr->seq );
 	ack = ntohl ( tcphdr->ack );
-	win = ntohs ( tcphdr->win );
+	raw_win = ntohs ( tcphdr->win );
 	flags = tcphdr->flags;
 	tcp_rx_opts ( tcp, ( ( ( void * ) tcphdr ) + sizeof ( *tcphdr ) ),
 		      ( hlen - sizeof ( *tcphdr ) ), &options );
@@ -1173,6 +1229,7 @@ static int tcp_rx ( struct io_buffer *iobuf,
 
 	/* Handle ACK, if present */
 	if ( flags & TCP_ACK ) {
+		win = ( raw_win << tcp->snd_win_scale );
 		if ( ( rc = tcp_rx_ack ( tcp, ack, win ) ) != 0 ) {
 			tcp_xmit_reset ( tcp, st_src, tcphdr );
 			goto discard;
@@ -1244,13 +1301,29 @@ struct tcpip_protocol tcp_protocol __tcpip_protocol = {
 static unsigned int tcp_discard ( void ) {
 	struct tcp_connection *tcp;
 	struct io_buffer *iobuf;
+	struct tcp_rx_queued_header *tcpqhdr;
+	uint32_t max_win;
 	unsigned int discarded = 0;
 
 	/* Try to drop one queued RX packet from each connection */
 	list_for_each_entry ( tcp, &tcp_conns, list ) {
 		list_for_each_entry_reverse ( iobuf, &tcp->rx_queue, list ) {
+
+			/* Limit window to prevent future discards */
+			tcpqhdr = iobuf->data;
+			max_win = ( tcpqhdr->seq - tcp->rcv_ack );
+			if ( max_win < tcp->max_rcv_win ) {
+				DBGC ( tcp, "TCP %p reducing maximum window "
+				       "from %d to %d\n",
+				       tcp, tcp->max_rcv_win, max_win );
+				tcp->max_rcv_win = max_win;
+			}
+
+			/* Remove packet from queue */
 			list_del ( &iobuf->list );
 			free_iob ( iobuf );
+
+			/* Report discard */
 			discarded++;
 			break;
 		}
@@ -1260,7 +1333,7 @@ static unsigned int tcp_discard ( void ) {
 }
 
 /** TCP cache discarder */
-struct cache_discarder tcp_cache_discarder __cache_discarder = {
+struct cache_discarder tcp_discarder __cache_discarder ( CACHE_NORMAL ) = {
 	.discard = tcp_discard,
 };
 
@@ -1320,6 +1393,9 @@ static int tcp_xfer_deliver ( struct tcp_connection *tcp,
 
 	/* Enqueue packet */
 	list_add_tail ( &iobuf->list, &tcp->tx_queue );
+
+	/* Each enqueued packet is a pending operation */
+	pending_get ( &tcp->pending_data );
 
 	/* Transmit data, if possible */
 	tcp_xmit ( tcp );

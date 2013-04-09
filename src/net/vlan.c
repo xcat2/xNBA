@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -280,6 +281,23 @@ struct net_protocol vlan_protocol __net_protocol = {
 	.net_proto = htons ( ETH_P_8021Q ),
 	.rx = vlan_rx,
 };
+
+/**
+ * Get the VLAN tag
+ *
+ * @v netdev		Network device
+ * @ret tag		VLAN tag, or 0 if device is not a VLAN device
+ */
+unsigned int vlan_tag ( struct net_device *netdev ) {
+	struct vlan_device *vlan;
+
+	if ( netdev->op == &vlan_operations ) {
+		vlan = netdev->priv;
+		return vlan->tag;
+	} else {
+		return 0;
+	}
+}
 
 /**
  * Check if network device can be used as a VLAN trunk device

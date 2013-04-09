@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  */
 
@@ -544,8 +545,7 @@ alloc_basemem:
  * Free space allocated with alloc_basemem.
  *
  * Parameters:
- *   %ax : .text16 segment address
- *   %bx : .data16 segment address
+ *   none (.text16 segment address is implicit in %cs)
  * Returns:
  *   %ax : 0 if successfully freed
  * Corrupts:
@@ -558,14 +558,14 @@ alloc_basemem:
 free_basemem:
 	/* Preserve registers */
 	pushw	%fs
+	pushw	%ax
 
 	/* Check FBMS counter */
-	pushw	%ax
+	movw	%cs, %ax
 	shrw	$6, %ax
 	pushw	$0x40
 	popw	%fs
 	cmpw	%ax, %fs:0x13
-	popw	%ax
 	jne	1f
 
 	/* Check hooked interrupt count */
@@ -573,6 +573,7 @@ free_basemem:
 	jne	1f
 
 	/* OK to free memory */
+	movw	%cs, %ax
 	addw	$_text16_memsz_pgh, %ax
 	addw	$_data16_memsz_pgh, %ax
 	shrw	$6, %ax
@@ -580,6 +581,7 @@ free_basemem:
 	xorw	%ax, %ax
 
 1:	/* Restore registers and return */
+	popw	%ax
 	popw	%fs
 	ret
 	.size free_basemem, . - free_basemem
@@ -620,7 +622,7 @@ install:
 	/* Image destination = default */
 	xorl	%edi, %edi
 	/* Allow arbitrary relocation */
-	xorl	%ebp, %ebp
+	orl	$0xffffffff, %ebp
 	/* Install text and data segments */
 	call	install_prealloc
 	/* Restore registers and return */
@@ -640,7 +642,9 @@ install:
  *   %bx  : .data16 segment address
  *   %esi : Image source physical address (or zero for %cs:0000)
  *   %edi : Decompression temporary area physical address (or zero for default)
- *   %ebp : Maximum end address for relocation (or zero for no maximum)
+ *   %ebp : Maximum end address for relocation
+ *          - 0xffffffff for no maximum
+ *          - 0x00000000 to inhibit use of INT 15,e820 and INT 15,e801
  * Corrupts:
  *   none
  ****************************************************************************
@@ -663,18 +667,22 @@ install_prealloc:
 	/* Save decompression temporary area physical address */
 	pushl	%edi
 
-	/* Install .text16.early */
+	/* Install .text16.early and calculate %ecx as offset to next block */
 	progress "  .text16.early\n"
 	pushl	%esi
 	xorl	%esi, %esi
 	movw	%cs, %si
 	shll	$4, %esi
+	pushl	%esi			/* Save original %cs:0000 */
 	addl	$_text16_early_lma, %esi
 	movzwl	%ax, %edi
 	shll	$4, %edi
 	movl	$_text16_early_filesz, %ecx
 	movl	$_text16_early_memsz, %edx
 	call	install_block		/* .text16.early */
+	popl	%ecx			/* Calculate offset to next block */
+	subl	%esi, %ecx
+	negl	%ecx
 	popl	%esi
 
 #ifndef KEEP_IT_REAL
@@ -729,7 +737,7 @@ payload_death_message:
 	jnz	1f
 	movw	%cs, %si
 	shll	$4, %esi
-1:	addl	payload_lma, %esi
+1:	addl	%ecx, %esi
 
 	/* Install .text16.late and .data16 */
 	progress "  .text16.late\n"
@@ -789,6 +797,13 @@ payload_death_message:
 	progress "  init_librm\n"
 	movw	%ax, (init_librm_vector+2)
 	lcall	*init_librm_vector
+
+	/* Inhibit INT 15,e820 and INT 15,e801 if applicable */
+	testl	%ebp, %ebp
+	jnz	1f
+	incb	memmap_post
+	decl	%ebp
+1:
 
 	/* Call relocate() to determine target address for relocation.
 	 * relocate() will return with %esi, %edi and %ecx set up
@@ -850,17 +865,6 @@ close_payload_vector:
 	.word 0
 	.size close_payload_vector, . - close_payload_vector
 
-	/* Payload address */
-	.section ".prefix.lib", "awx", @progbits
-payload_lma:
-	.long 0
-	.section ".zinfo.fixup", "a", @progbits	/* Compressor fixups */
-	.ascii	"ADHL"
-	.long	payload_lma
-	.long	1
-	.long	0
-	.previous
-
 	/* Dummy routines to open and close payload */
 	.section ".text16.early.data", "aw", @progbits
 	.weak	open_payload
@@ -878,8 +882,7 @@ close_payload:
  * Uninstall all text and data segments.
  *
  * Parameters:
- *   %ax  : .text16 segment address
- *   %bx  : .data16 segment address
+ *   none (.text16 segment address is implicit in %cs)
  * Returns:
  *   none
  * Corrupts:
@@ -914,6 +917,10 @@ uninstall:
 	.ascii	"PAYL"
 	.long	0
 	.long	0
+	.long	_payload_align
+	.ascii	"COPY"
+	.long	_pprefix_lma
+	.long	_pprefix_filesz
 	.long	_max_align
 	.ascii	PACK_OR_COPY
 	.long	_text16_late_lma
@@ -927,3 +934,6 @@ uninstall:
 	.long	_textdata_lma
 	.long	_textdata_filesz
 	.long	_max_align
+
+	.weak	_payload_align
+	.equ	_payload_align, 1

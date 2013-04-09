@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -79,9 +80,22 @@ int call_bootsector ( unsigned int segment, unsigned int offset,
 					   "movw %%ss, %%ax\n\t"
 					   "movw %%ax, %%cs:saved_ss\n\t"
 					   "movw %%sp, %%cs:saved_sp\n\t"
-					   /* Jump to boot sector */
+					   /* Prepare jump to boot sector */
 					   "pushw %%bx\n\t"
 					   "pushw %%di\n\t"
+					   /* Clear all registers */
+					   "xorl %%eax, %%eax\n\t"
+					   "xorl %%ebx, %%ebx\n\t"
+					   "xorl %%ecx, %%ecx\n\t"
+					   /* %edx contains drive number */
+					   "xorl %%esi, %%esi\n\t"
+					   "xorl %%edi, %%edi\n\t"
+					   "xorl %%ebp, %%ebp\n\t"
+					   "movw %%ax, %%ds\n\t"
+					   "movw %%ax, %%es\n\t"
+					   "movw %%ax, %%fs\n\t"
+					   "movw %%ax, %%gs\n\t"
+					   /* Jump to boot sector */
 					   "sti\n\t"
 					   "lret\n\t"
 					   /* Preserved variables */

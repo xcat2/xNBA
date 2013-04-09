@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -87,13 +88,15 @@ void cbc_encrypt ( void *ctx, const void *src, void *dst, size_t len,
 void cbc_decrypt ( void *ctx, const void *src, void *dst, size_t len,
 		   struct cipher_algorithm *raw_cipher, void *cbc_ctx ) {
 	size_t blocksize = raw_cipher->blocksize;
+	uint8_t next_cbc_ctx[blocksize];
 
 	assert ( ( len % blocksize ) == 0 );
 
 	while ( len ) {
+		memcpy ( next_cbc_ctx, src, blocksize );
 		cipher_decrypt ( raw_cipher, ctx, src, dst, blocksize );
 		cbc_xor ( cbc_ctx, dst, blocksize );
-		memcpy ( cbc_ctx, src, blocksize );
+		memcpy ( cbc_ctx, next_cbc_ctx, blocksize );
 		dst += blocksize;
 		src += blocksize;
 		len -= blocksize;

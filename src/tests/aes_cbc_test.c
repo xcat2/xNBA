@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -168,9 +169,21 @@ AES_CBC_TEST ( test_256,
  *
  */
 static void aes_cbc_test_exec ( void ) {
+	struct cipher_algorithm *cipher = &aes_cbc_algorithm;
 
+	/* Correctness tests */
 	aes_cbc_ok ( &test_128 );
 	aes_cbc_ok ( &test_256 );
+
+	/* Speed tests */
+	DBG ( "AES128 encryption required %ld cycles per byte\n",
+	      cbc_cost_encrypt ( cipher, test_128.key_len ) );
+	DBG ( "AES128 decryption required %ld cycles per byte\n",
+	      cbc_cost_decrypt ( cipher, test_128.key_len ) );
+	DBG ( "AES256 encryption required %ld cycles per byte\n",
+	      cbc_cost_encrypt ( cipher, test_256.key_len ) );
+	DBG ( "AES256 decryption required %ld cycles per byte\n",
+	      cbc_cost_decrypt ( cipher, test_256.key_len ) );
 }
 
 /** AES-in-CBC-mode self-test */

@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -26,6 +27,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/image.h>
 #include <ipxe/command.h>
 #include <ipxe/parseopt.h>
+#include <ipxe/shell.h>
 #include <usr/imgmgmt.h>
 
 /** @file
@@ -38,19 +40,28 @@ FILE_LICENCE ( GPL2_OR_LATER );
 struct imgsingle_options {
 	/** Image name */
 	const char *name;
+	/** Replace image */
+	int replace;
+	/** Free image after execution */
+	int autofree;
 };
 
 /** "img{single}" option list */
 static struct option_descriptor imgsingle_opts[] = {
 	OPTION_DESC ( "name", 'n', required_argument,
 		      struct imgsingle_options, name, parse_string ),
+	OPTION_DESC ( "replace", 'r', no_argument,
+		      struct imgsingle_options, replace, parse_flag ),
+	OPTION_DESC ( "autofree", 'a', no_argument,
+		      struct imgsingle_options, autofree, parse_flag ),
 };
 
 /** "img{single}" command descriptor */
 static struct command_descriptor imgsingle_cmd =
 	COMMAND_DESC ( struct imgsingle_options, imgsingle_opts,
 		       1, MAX_ARGUMENTS,
-		       "[--name <name>] <uri|image> [<arguments>...]" );
+		       "[--name <name>] [--autofree] "
+		       "<uri|image> [<arguments>...]" );
 
 /** An "img{single}" family command descriptor */
 struct imgsingle_descriptor {
@@ -61,7 +72,8 @@ struct imgsingle_descriptor {
 	/** Pre-action to take upon image, or NULL */
 	void ( * preaction ) ( struct image *image );
 	/** Action to take upon image, or NULL */
-	int ( * action ) ( struct image *image );
+	int ( * action ) ( struct image *image,
+			   struct imgsingle_options *opts );
 	/** Verb to describe action */
 	const char *verb;
 };
@@ -134,9 +146,13 @@ static int imgsingle_exec ( int argc, char **argv,
 		}
 	}
 
+	/* Set the auto-unregister flag, if applicable */
+	if ( opts.autofree )
+		image->flags |= IMAGE_AUTO_UNREGISTER;
+
 	/* Carry out command action, if applicable */
 	if ( desc->action ) {
-		if ( ( rc = desc->action ( image ) ) != 0 ) {
+		if ( ( rc = desc->action ( image, &opts ) ) != 0 ) {
 			printf ( "Could not %s: %s\n",
 				 desc->verb, strerror ( rc ) );
 			goto err_action;
@@ -160,7 +176,7 @@ static int imgsingle_exec ( int argc, char **argv,
 static struct command_descriptor imgfetch_cmd =
 	COMMAND_DESC ( struct imgsingle_options, imgsingle_opts,
 		       1, MAX_ARGUMENTS,
-		       "[--name <name>] <uri> [<arguments>...]" );
+		       "[--name <name>] [--autofree] <uri> [<arguments>...]" );
 
 /** "imgfetch" family command descriptor */
 struct imgsingle_descriptor imgfetch_desc = {
@@ -179,11 +195,23 @@ static int imgfetch_exec ( int argc, char **argv ) {
 	return imgsingle_exec ( argc, argv, &imgfetch_desc );
 }
 
+/**
+ * "imgselect" command action
+ *
+ * @v image		Image
+ * @v opts		Options
+ * @ret rc		Return status code
+ */
+static int imgselect ( struct image *image,
+		       struct imgsingle_options *opts __unused ) {
+	return image_select ( image );
+}
+
 /** "imgselect" family command descriptor */
 struct imgsingle_descriptor imgselect_desc = {
 	.cmd = &imgsingle_cmd,
 	.acquire = imgacquire,
-	.action = image_select,
+	.action = imgselect,
 	.verb = "select",
 };
 
@@ -202,13 +230,44 @@ static int imgselect_exec ( int argc, char **argv ) {
 static struct command_descriptor imgexec_cmd =
 	COMMAND_DESC ( struct imgsingle_options, imgsingle_opts,
 		       0, MAX_ARGUMENTS,
-		       "[--name <name>] [<uri|image> [<arguments>...]]" );
+		       "[--autofree] [--replace] "
+		       "[<uri|image> [<arguments>...]]" );
+
+/**
+ * "imgexec" command action
+ *
+ * @v image		Image
+ * @v opts		Options
+ * @ret rc		Return status code
+ */
+static int imgexec ( struct image *image, struct imgsingle_options *opts ) {
+	int rc;
+
+	/* Perform replacement or execution as applicable */
+	if ( opts->replace ) {
+
+		/* Try to replace image */
+		if ( ( rc = image_replace ( image ) ) != 0 )
+			return rc;
+
+		/* Stop script and tail-recurse into replacement image */
+		shell_stop ( SHELL_STOP_COMMAND_SEQUENCE );
+
+	} else {
+
+		/* Try to execute image */
+		if ( ( rc = image_exec ( image ) ) != 0 )
+			return rc;
+	}
+
+	return 0;
+}
 
 /** "imgexec" family command descriptor */
 struct imgsingle_descriptor imgexec_desc = {
 	.cmd = &imgexec_cmd,
 	.acquire = imgacquire,
-	.action = image_exec,
+	.action = imgexec,
 	.verb = "boot",
 };
 

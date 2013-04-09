@@ -10,6 +10,7 @@
 FILE_LICENCE ( GPL2_OR_LATER );
 
 #include <stdint.h>
+#include <time.h>
 #include <ipxe/tables.h>
 
 /** An ASN.1 object cursor */
@@ -19,6 +20,34 @@ struct asn1_cursor {
 	/** Length of data */
 	size_t len;
 };
+
+/** An ASN.1 object builder */
+struct asn1_builder {
+	/** Data
+	 *
+	 * This is always dynamically allocated.  If @c data is NULL
+	 * while @len is non-zero, this indicates that a memory
+	 * allocation error has occurred during the building process.
+	 */
+	void *data;
+	/** Length of data */
+	size_t len;
+};
+
+/** Maximum (viable) length of ASN.1 length
+ *
+ * While in theory unlimited, this length is sufficient to contain a
+ * size_t.
+ */
+#define ASN1_MAX_LEN_LEN ( 1 + sizeof ( size_t ) )
+
+/** An ASN.1 header */
+struct asn1_builder_header {
+	/** Type */
+	uint8_t type;
+	/** Length (encoded) */
+	uint8_t length[ASN1_MAX_LEN_LEN];
+} __attribute__ (( packed ));
 
 /** ASN.1 end */
 #define ASN1_END 0x00
@@ -40,6 +69,9 @@ struct asn1_cursor {
 
 /** ASN.1 object identifier */
 #define ASN1_OID 0x06
+
+/** ASN.1 enumeration */
+#define ASN1_ENUMERATED 0x0a
 
 /** ASN.1 UTC time */
 #define ASN1_UTC_TIME 0x17
@@ -175,6 +207,21 @@ struct asn1_cursor {
 	ASN1_OID_SINGLE ( 5 ), ASN1_OID_SINGLE ( 7 ),		\
 	ASN1_OID_SINGLE ( 48 ), ASN1_OID_SINGLE ( 1 )
 
+/** ASN.1 OID for id-pkix-ocsp-basic ( 1.3.6.1.5.5.7.48.1.1) */
+#define ASN1_OID_OCSP_BASIC					\
+	ASN1_OID_INITIAL ( 1, 3 ), ASN1_OID_SINGLE ( 6 ),	\
+	ASN1_OID_SINGLE ( 1 ), ASN1_OID_SINGLE ( 5 ),		\
+	ASN1_OID_SINGLE ( 5 ), ASN1_OID_SINGLE ( 7 ),		\
+	ASN1_OID_SINGLE ( 48 ), ASN1_OID_SINGLE ( 1 ),		\
+	ASN1_OID_SINGLE ( 1 )
+
+/** ASN.1 OID for id-kp-OCSPSigning (1.3.6.1.5.5.7.3.9) */
+#define ASN1_OID_OCSPSIGNING					\
+	ASN1_OID_INITIAL ( 1, 3 ), ASN1_OID_SINGLE ( 6 ),	\
+	ASN1_OID_SINGLE ( 1 ), ASN1_OID_SINGLE ( 5 ),		\
+	ASN1_OID_SINGLE ( 5 ), ASN1_OID_SINGLE ( 7 ),		\
+	ASN1_OID_SINGLE ( 3 ), ASN1_OID_SINGLE ( 9 )
+
 /** Define an ASN.1 cursor containing an OID */
 #define ASN1_OID_CURSOR( oid_value ) {				\
 		.data = oid_value,				\
@@ -199,18 +246,14 @@ struct asn1_algorithm {
 /** Declare an ASN.1 OID-identified algorithm */
 #define __asn1_algorithm __table_entry ( ASN1_ALGORITHMS, 01 )
 
-/** An ASN.1 boolean */
-struct asn1_boolean {
-	/** Value */
-	uint8_t value;
-} __attribute__ (( packed ));
-
 /** An ASN.1 bit string */
 struct asn1_bit_string {
-	/** Number of unused bits */
-	uint8_t unused;
 	/** Data */
-	uint8_t data[0];
+	const void *data;
+	/** Length */
+	size_t len;
+	/** Unused bits at end of data */
+	unsigned int unused;
 } __attribute__ (( packed ));
 
 /**
@@ -235,9 +278,26 @@ extern int asn1_skip_any ( struct asn1_cursor *cursor );
 extern int asn1_shrink_any ( struct asn1_cursor *cursor );
 extern int asn1_boolean ( const struct asn1_cursor *cursor );
 extern int asn1_integer ( const struct asn1_cursor *cursor, int *value );
+extern int asn1_bit_string ( const struct asn1_cursor *cursor,
+			     struct asn1_bit_string *bits );
+extern int asn1_integral_bit_string ( const struct asn1_cursor *cursor,
+				      struct asn1_bit_string *bits );
 extern int asn1_compare ( const struct asn1_cursor *cursor1,
 			  const struct asn1_cursor *cursor2 );
-extern struct asn1_algorithm *
-asn1_algorithm ( const struct asn1_cursor *cursor );
+extern int asn1_algorithm ( const struct asn1_cursor *cursor,
+			    struct asn1_algorithm **algorithm );
+extern int asn1_pubkey_algorithm ( const struct asn1_cursor *cursor,
+				   struct asn1_algorithm **algorithm );
+extern int asn1_digest_algorithm ( const struct asn1_cursor *cursor,
+				   struct asn1_algorithm **algorithm );
+extern int asn1_signature_algorithm ( const struct asn1_cursor *cursor,
+				      struct asn1_algorithm **algorithm );
+extern int asn1_generalized_time ( const struct asn1_cursor *cursor,
+				   time_t *time );
+extern int asn1_prepend_raw ( struct asn1_builder *builder, const void *data,
+			      size_t len );
+extern int asn1_prepend ( struct asn1_builder *builder, unsigned int type,
+			  const void *data, size_t len );
+extern int asn1_wrap ( struct asn1_builder *builder, unsigned int type );
 
 #endif /* _IPXE_ASN1_H */

@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -53,37 +54,52 @@ struct interface monojob = INTF_INIT ( monojob_intf_desc );
 /**
  * Wait for single foreground job to complete
  *
- * @v string		Job description to display
+ * @v string		Job description to display, or NULL to be silent
  * @ret rc		Job final status code
  */
 int monojob_wait ( const char *string ) {
 	struct job_progress progress;
 	int key;
 	int rc;
+	unsigned long last_keycheck;
 	unsigned long last_progress;
+	unsigned long now;
 	unsigned long elapsed;
 	unsigned long completed;
 	unsigned long total;
 	unsigned int percentage;
 	int shown_percentage = 0;
 
-	printf ( "%s...", string );
+	if ( string )
+		printf ( "%s...", string );
 	monojob_rc = -EINPROGRESS;
-	last_progress = currticks();
+	last_keycheck = last_progress = currticks();
 	while ( monojob_rc == -EINPROGRESS ) {
+
+		/* Allow job to progress */
 		step();
-		if ( iskey() ) {
-			key = getchar();
-			switch ( key ) {
-			case CTRL_C:
-				monojob_close ( &monojob, -ECANCELED );
-				break;
-			default:
-				break;
+		now = currticks();
+
+		/* Check for keypresses.  This can be time-consuming,
+		 * so check only once per clock tick.
+		 */
+		if ( now != last_keycheck ) {
+			if ( iskey() ) {
+				key = getchar();
+				switch ( key ) {
+				case CTRL_C:
+					monojob_close ( &monojob, -ECANCELED );
+					break;
+				default:
+					break;
+				}
 			}
+			last_keycheck = now;
 		}
-		elapsed = ( currticks() - last_progress );
-		if ( elapsed >= TICKS_PER_SEC ) {
+
+		/* Display progress, if applicable */
+		elapsed = ( now - last_progress );
+		if ( string && ( elapsed >= TICKS_PER_SEC ) ) {
 			if ( shown_percentage )
 				printf ( "\b\b\b\b    \b\b\b\b" );
 			job_progress ( &monojob, &progress );
@@ -98,7 +114,7 @@ int monojob_wait ( const char *string ) {
 				printf ( "." );
 				shown_percentage = 0;
 			}
-			last_progress = currticks();
+			last_progress = now;
 		}
 	}
 	rc = monojob_rc;
@@ -106,10 +122,13 @@ int monojob_wait ( const char *string ) {
 	if ( shown_percentage )
 		printf ( "\b\b\b\b    \b\b\b\b" );
 
-	if ( rc ) {
-		printf ( " %s\n", strerror ( rc ) );
-	} else {
-		printf ( " ok\n" );
+	if ( string ) {
+		if ( rc ) {
+			printf ( " %s\n", strerror ( rc ) );
+		} else {
+			printf ( " ok\n" );
+		}
 	}
+
 	return rc;
 }

@@ -14,7 +14,8 @@
  *
  *    You should have received a copy of the GNU General Public License
  *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ *    02110-1301, USA.
  *
  * Portions of this code are taken from the Linux forcedeth driver that was
  * based on a cleanroom reimplementation which was based on reverse engineered
@@ -54,7 +55,7 @@ struct ring_desc_ex {
 #define DESC_VER_3	3
 
 #define RX_RING_SIZE		16
-#define TX_RING_SIZE		16
+#define TX_RING_SIZE		32
 #define RXTX_RING_SIZE		( ( RX_RING_SIZE ) + ( TX_RING_SIZE ) )
 #define RX_RING_MIN		128
 #define TX_RING_MIN		64

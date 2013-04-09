@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -31,6 +32,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/timer.h>
 #include <ipxe/console.h>
 #include <ipxe/menu.h>
+#include <config/colour.h>
 
 /* Colour pairs */
 #define CPAIR_NORMAL	1
@@ -245,12 +247,17 @@ static int menu_loop ( struct menu_ui *ui, struct menu_item **selected ) {
 				i = 0;
 				list_for_each_entry ( item, &ui->menu->items,
 						      list ) {
-					if ( item->shortcut == key ) {
-						ui->selected = i;
-						chosen = 1;
-						break;
+					if ( ! ( item->shortcut &&
+						 ( item->shortcut == key ) ) ) {
+						i++;
+						continue;
 					}
-					i++;
+					ui->selected = i;
+					if ( item->label ) {
+						chosen = 1;
+					} else {
+						move = +1;
+					}
 				}
 				break;
 			}
@@ -281,12 +288,10 @@ static int menu_loop ( struct menu_ui *ui, struct menu_item **selected ) {
 			draw_menu_item ( ui, ui->selected );
 		}
 
-		/* Refuse to choose unlabelled items (i.e. separators) */
-		item = menu_item ( ui->menu, ui->selected );
-		if ( ! item->label )
-			chosen = 0;
-
 		/* Record selection */
+		item = menu_item ( ui->menu, ui->selected );
+		assert ( item != NULL );
+		assert ( item->label != NULL );
 		*selected = item;
 
 	} while ( ( rc == 0 ) && ! chosen );
@@ -306,6 +311,7 @@ int show_menu ( struct menu *menu, unsigned int timeout_ms,
 		const char *select, struct menu_item **selected ) {
 	struct menu_item *item;
 	struct menu_ui ui;
+	char buf[ MENU_COLS + 1 /* NUL */ ];
 	int labelled_count = 0;
 	int rc;
 
@@ -339,16 +345,16 @@ int show_menu ( struct menu *menu, unsigned int timeout_ms,
 	/* Initialise screen */
 	initscr();
 	start_color();
-	init_pair ( CPAIR_NORMAL, COLOR_WHITE, COLOR_BLUE );
-	init_pair ( CPAIR_SELECT, COLOR_WHITE, COLOR_RED );
-	init_pair ( CPAIR_SEPARATOR, COLOR_CYAN, COLOR_BLUE );
+	init_pair ( CPAIR_NORMAL, COLOR_NORMAL_FG, COLOR_NORMAL_BG );
+	init_pair ( CPAIR_SELECT, COLOR_SELECT_FG, COLOR_SELECT_BG );
+	init_pair ( CPAIR_SEPARATOR, COLOR_SEPARATOR_FG, COLOR_SEPARATOR_BG );
 	color_set ( CPAIR_NORMAL, NULL );
 	erase();
 
 	/* Draw initial content */
 	attron ( A_BOLD );
-	mvprintw ( TITLE_ROW, ( ( COLS - strlen ( ui.menu->title ) ) / 2 ),
-		   "%s", ui.menu->title );
+	snprintf ( buf, sizeof ( buf ), "%s", ui.menu->title );
+	mvprintw ( TITLE_ROW, ( ( COLS - strlen ( buf ) ) / 2 ), "%s", buf );
 	attroff ( A_BOLD );
 	draw_menu_items ( &ui );
 	draw_menu_item ( &ui, ui.selected );

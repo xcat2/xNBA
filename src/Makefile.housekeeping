@@ -162,9 +162,12 @@ endif
 # output of "size".  Inhibit this.
 #
 ifeq ($(CCTYPE),gcc)
-CFI_TEST = $(CC) -fno-dwarf2-cfi-asm -x c -c /dev/null \
+CFI_TEST = $(CC) -fno-dwarf2-cfi-asm -fno-exceptions -fno-unwind-tables \
+		 -fno-asynchronous-unwind-tables -x c -c /dev/null \
 		 -o /dev/null >/dev/null 2>&1
-CFI_FLAGS := $(shell $(CFI_TEST) && $(ECHO) '-fno-dwarf2-cfi-asm')
+CFI_FLAGS := $(shell $(CFI_TEST) && \
+	       $(ECHO) '-fno-dwarf2-cfi-asm -fno-exceptions ' \
+		       '-fno-unwind-tables -fno-asynchronous-unwind-tables')
 WORKAROUND_CFLAGS += $(CFI_FLAGS)
 endif
 
@@ -608,36 +611,39 @@ CFLAGS_clientcert += $(if $(CERT),-DCERTIFICATE="\"$(CERT_INC)\"")
 
 # (Single-element) list of client private keys
 #
-KEY_LIST := $(BIN)/.private_key.list
-ifeq ($(wildcard $(KEY_LIST)),)
-KEY_OLD := <invalid>
+ifdef KEY
+PRIVKEY	:= $(KEY) # Maintain backwards compatibility
+endif
+PRIVKEY_LIST := $(BIN)/.private_key.list
+ifeq ($(wildcard $(PRIVKEY_LIST)),)
+PRIVKEY_OLD := <invalid>
 else
-KEY_OLD := $(shell cat $(KEY_LIST))
+PRIVKEY_OLD := $(shell cat $(PRIVKEY_LIST))
 endif
-ifneq ($(KEY_OLD),$(KEY))
-$(shell $(ECHO) "$(KEY)" > $(KEY_LIST))
+ifneq ($(PRIVKEY_OLD),$(PRIVKEY))
+$(shell $(ECHO) "$(PRIVKEY)" > $(PRIVKEY_LIST))
 endif
 
-$(KEY_LIST) :
+$(PRIVKEY_LIST) :
 
-VERYCLEANUP += $(KEY_LIST)
+VERYCLEANUP += $(PRIVKEY_LIST)
 
 # Embedded client private key
 #
-KEY_INC := $(BIN)/.private_key.der
+PRIVKEY_INC := $(BIN)/.private_key.der
 
-ifdef KEY
-$(KEY_INC) : $(KEY) $(KEY_LIST)
+ifdef PRIVKEY
+$(PRIVKEY_INC) : $(PRIVKEY) $(PRIVKEY_LIST)
 	$(Q)$(OPENSSL) rsa -in $< -outform DER -out $@
 
-clientcert_DEPS += $(KEY_INC)
+clientcert_DEPS += $(PRIVKEY_INC)
 endif
 
-CLEANUP += $(KEY_INC)
+CLEANUP += $(PRIVKEY_INC)
 
-clientcert_DEPS += $(KEY_LIST)
+clientcert_DEPS += $(PRIVKEY_LIST)
 
-CFLAGS_clientcert += $(if $(KEY),-DPRIVATE_KEY="\"$(KEY_INC)\"")
+CFLAGS_clientcert += $(if $(PRIVKEY),-DPRIVATE_KEY="\"$(PRIVKEY_INC)\"")
 
 # These files use .incbin inline assembly to include a binary file.
 # Unfortunately ccache does not detect this dependency and caches
@@ -646,6 +652,17 @@ CFLAGS_clientcert += $(if $(KEY),-DPRIVATE_KEY="\"$(KEY_INC)\"")
 $(BIN)/embedded.o : override CC := env CCACHE_DISABLE=1 $(CC)
 
 $(BIN)/clientcert.o : override CC := env CCACHE_DISABLE=1 $(CC)
+
+# Version number
+#
+CFLAGS_version += -DVERSION_MAJOR=$(VERSION_MAJOR) \
+		  -DVERSION_MINOR=$(VERSION_MINOR) \
+		  -DVERSION_PATCH=$(VERSION_PATCH) \
+		  -DVERSION="\"$(VERSION)\""
+# Make sure the version number gets updated on every git checkout
+ifneq ($(GITVERSION),)
+$(BIN)/version.o : ../.git/index
+endif
 
 # We automatically generate rules for any file mentioned in AUTO_SRCS
 # using the following set of templates.  It would be cleaner to use
@@ -660,7 +677,7 @@ $(BIN)/clientcert.o : override CC := env CCACHE_DISABLE=1 $(CC)
 define deps_template
 	@$(ECHO) "  [DEPS] $(1)"
 	@$(MKDIR) -p $(BIN)/deps/$(dir $(1))
-	@$(CPP) $(CFLAGS) $(CFLAGS_$(2)) $(CFLAGS_$(3)) -DOBJECT=$(3) \
+	$(Q)$(CPP) $(CFLAGS) $(CFLAGS_$(2)) $(CFLAGS_$(3)) -DOBJECT=$(3) \
 		-Wno-error -M $(1) -MG -MP | \
 		sed 's/\.o\s*:/_DEPS +=/' > $(BIN)/deps/$(1).d
 endef

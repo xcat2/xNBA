@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -25,6 +26,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <byteswap.h>
 #include <ipxe/xfer.h>
 #include <ipxe/open.h>
@@ -57,6 +59,41 @@ static struct interface_descriptor syslogger_desc =
 
 /** The syslog UDP interface */
 static struct interface syslogger = INTF_INIT ( syslogger_desc );
+
+/******************************************************************************
+ *
+ * Console driver
+ *
+ ******************************************************************************
+ */
+
+/** Host name (for log messages) */
+static char *syslog_hostname;
+
+/** Domain name (for log messages) */
+static char *syslog_domain;
+
+/**
+ * Transmit formatted syslog message
+ *
+ * @v xfer		Data transfer interface
+ * @v severity		Severity
+ * @v message		Message
+ * @v terminator	Message terminator
+ * @ret rc		Return status code
+ */
+int syslog_send ( struct interface *xfer, unsigned int severity,
+		  const char *message, const char *terminator ) {
+
+	return xfer_printf ( xfer, "<%d>%s%s%s%sipxe: %s%s",
+			     SYSLOG_PRIORITY ( SYSLOG_DEFAULT_FACILITY,
+					       severity ),
+			     ( syslog_hostname ? syslog_hostname : "" ),
+			     ( syslog_domain ? "." : "" ),
+			     ( syslog_domain ? syslog_domain : "" ),
+			     ( ( syslog_hostname || syslog_domain ) ? " " : ""),
+			     message, terminator );
+}
 
 /******************************************************************************
  *
@@ -124,10 +161,8 @@ static void syslog_putchar ( int character ) {
 	syslog_entered = 1;
 
 	/* Send log message */
-	if ( ( rc = xfer_printf ( &syslogger, "<%d>ipxe: %s",
-				  SYSLOG_PRIORITY ( SYSLOG_DEFAULT_FACILITY,
-						    syslog_severity ),
-				  syslog_buffer ) ) != 0 ) {
+	if ( ( rc = syslog_send ( &syslogger, syslog_severity,
+				  syslog_buffer, "" ) ) != 0 ) {
 		DBG ( "SYSLOG could not send log message: %s\n",
 		      strerror ( rc ) );
 	}
@@ -169,6 +204,20 @@ static int apply_syslog_settings ( void ) {
 	struct in_addr old_addr;
 	int len;
 	int rc;
+
+	/* Fetch hostname and domain name */
+	free ( syslog_hostname );
+	if ( ( len = fetch_string_setting_copy ( NULL, &hostname_setting,
+						 &syslog_hostname ) ) < 0 ) {
+		rc = len;
+		DBG ( "SYSLOG could not fetch hostname: %s\n", strerror ( rc ));
+	}
+	free ( syslog_domain );
+	if ( ( len = fetch_string_setting_copy ( NULL, &domain_setting,
+						 &syslog_domain ) ) < 0 ) {
+		rc = len;
+		DBG ( "SYSLOG could not fetch domain: %s\n", strerror ( rc ) );
+	}
 
 	/* Fetch log server */
 	syslog_console.disabled = 1;

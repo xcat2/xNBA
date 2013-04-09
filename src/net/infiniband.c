@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -167,6 +168,7 @@ void ib_poll_cq ( struct ib_device *ibdev,
  * @v send_cq		Send completion queue
  * @v num_recv_wqes	Number of receive work queue entries
  * @v recv_cq		Receive completion queue
+ * @v op		Queue pair operations
  * @ret qp		Queue pair
  *
  * The queue pair will be left in the INIT state; you must call
@@ -177,7 +179,8 @@ struct ib_queue_pair * ib_create_qp ( struct ib_device *ibdev,
 				      unsigned int num_send_wqes,
 				      struct ib_completion_queue *send_cq,
 				      unsigned int num_recv_wqes,
-				      struct ib_completion_queue *recv_cq ) {
+				      struct ib_completion_queue *recv_cq,
+				      struct ib_queue_pair_operations *op ) {
 	struct ib_queue_pair *qp;
 	size_t total_size;
 	int rc;
@@ -209,6 +212,7 @@ struct ib_queue_pair * ib_create_qp ( struct ib_device *ibdev,
 	qp->recv.iobufs = ( ( ( void * ) qp ) + sizeof ( *qp ) +
 			    ( num_send_wqes * sizeof ( qp->send.iobufs[0] ) ));
 	INIT_LIST_HEAD ( &qp->mgids );
+	qp->op = op;
 
 	/* Perform device-specific initialisation and get QPN */
 	if ( ( rc = ibdev->op->create_qp ( ibdev, qp ) ) != 0 ) {
@@ -259,7 +263,6 @@ struct ib_queue_pair * ib_create_qp ( struct ib_device *ibdev,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		New address vector, if applicable
  * @ret rc		Return status code
  */
 int ib_modify_qp ( struct ib_device *ibdev, struct ib_queue_pair *qp ) {
@@ -301,7 +304,7 @@ void ib_destroy_qp ( struct ib_device *ibdev, struct ib_queue_pair *qp ) {
 	}
 	for ( i = 0 ; i < qp->recv.num_wqes ; i++ ) {
 		if ( ( iobuf = qp->recv.iobufs[i] ) != NULL ) {
-			ib_complete_recv ( ibdev, qp, NULL, iobuf,
+			ib_complete_recv ( ibdev, qp, NULL, NULL, iobuf,
 					   -ECANCELED );
 		}
 	}
@@ -380,14 +383,14 @@ struct ib_work_queue * ib_find_wq ( struct ib_completion_queue *cq,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector
+ * @v dest		Destination address vector
  * @v iobuf		I/O buffer
  * @ret rc		Return status code
  */
 int ib_post_send ( struct ib_device *ibdev, struct ib_queue_pair *qp,
-		   struct ib_address_vector *av,
+		   struct ib_address_vector *dest,
 		   struct io_buffer *iobuf ) {
-	struct ib_address_vector av_copy;
+	struct ib_address_vector dest_copy;
 	int rc;
 
 	/* Check queue fill level */
@@ -398,21 +401,21 @@ int ib_post_send ( struct ib_device *ibdev, struct ib_queue_pair *qp,
 	}
 
 	/* Use default address vector if none specified */
-	if ( ! av )
-		av = &qp->av;
+	if ( ! dest )
+		dest = &qp->av;
 
 	/* Make modifiable copy of address vector */
-	memcpy ( &av_copy, av, sizeof ( av_copy ) );
-	av = &av_copy;
+	memcpy ( &dest_copy, dest, sizeof ( dest_copy ) );
+	dest = &dest_copy;
 
 	/* Fill in optional parameters in address vector */
-	if ( ! av->qkey )
-		av->qkey = qp->qkey;
-	if ( ! av->rate )
-		av->rate = IB_RATE_2_5;
+	if ( ! dest->qkey )
+		dest->qkey = qp->qkey;
+	if ( ! dest->rate )
+		dest->rate = IB_RATE_2_5;
 
 	/* Post to hardware */
-	if ( ( rc = ibdev->op->post_send ( ibdev, qp, av, iobuf ) ) != 0 ) {
+	if ( ( rc = ibdev->op->post_send ( ibdev, qp, dest, iobuf ) ) != 0 ) {
 		DBGC ( ibdev, "IBDEV %p QPN %#lx could not post send WQE: "
 		       "%s\n", ibdev, qp->qpn, strerror ( rc ) );
 		return rc;
@@ -483,16 +486,19 @@ void ib_complete_send ( struct ib_device *ibdev, struct ib_queue_pair *qp,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector, or NULL
+ * @v dest		Destination address vector, or NULL
+ * @v source		Source address vector, or NULL
  * @v iobuf		I/O buffer
  * @v rc		Completion status code
  */
 void ib_complete_recv ( struct ib_device *ibdev, struct ib_queue_pair *qp,
-			struct ib_address_vector *av,
+			struct ib_address_vector *dest,
+			struct ib_address_vector *source,
 			struct io_buffer *iobuf, int rc ) {
 
 	if ( qp->recv.cq->op->complete_recv ) {
-		qp->recv.cq->op->complete_recv ( ibdev, qp, av, iobuf, rc );
+		qp->recv.cq->op->complete_recv ( ibdev, qp, dest, source,
+						 iobuf, rc );
 	} else {
 		free_iob ( iobuf );
 	}
@@ -513,7 +519,7 @@ void ib_refill_recv ( struct ib_device *ibdev, struct ib_queue_pair *qp ) {
 	while ( qp->recv.fill < qp->recv.num_wqes ) {
 
 		/* Allocate I/O buffer */
-		iobuf = alloc_iob ( IB_MAX_PAYLOAD_SIZE );
+		iobuf = qp->op->alloc_iob ( IB_MAX_PAYLOAD_SIZE );
 		if ( ! iobuf ) {
 			/* Non-fatal; we will refill on next attempt */
 			return;

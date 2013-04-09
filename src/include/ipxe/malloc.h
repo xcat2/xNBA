@@ -23,10 +23,32 @@ FILE_LICENCE ( GPL2_OR_LATER );
 
 extern size_t freemem;
 
-extern void * __malloc alloc_memblock ( size_t size, size_t align );
+extern void * __malloc alloc_memblock ( size_t size, size_t align,
+					size_t offset );
 extern void free_memblock ( void *ptr, size_t size );
 extern void mpopulate ( void *start, size_t len );
 extern void mdumpfree ( void );
+
+/**
+ * Allocate memory for DMA
+ *
+ * @v size		Requested size
+ * @v align		Physical alignment
+ * @v offset		Offset from physical alignment
+ * @ret ptr		Memory, or NULL
+ *
+ * Allocates physically-aligned memory for DMA.
+ *
+ * @c align must be a power of two.  @c size may not be zero.
+ */
+static inline void * __malloc malloc_dma_offset ( size_t size,
+						  size_t phys_align,
+						  size_t offset ) {
+	void * ptr = alloc_memblock ( size, phys_align, offset );
+	if ( ptr && size )
+		VALGRIND_MALLOCLIKE_BLOCK ( ptr, size, 0, 0 );
+	return ptr;
+}
 
 /**
  * Allocate memory for DMA
@@ -40,10 +62,7 @@ extern void mdumpfree ( void );
  * @c align must be a power of two.  @c size may not be zero.
  */
 static inline void * __malloc malloc_dma ( size_t size, size_t phys_align ) {
-	void * ptr = alloc_memblock ( size, phys_align );
-	if ( ptr && size )
-		VALGRIND_MALLOCLIKE_BLOCK ( ptr, size, 0, 0 );
-	return ptr;
+	return malloc_dma_offset ( size, phys_align, 0 );
 }
 
 /**
@@ -76,6 +95,17 @@ struct cache_discarder {
 #define CACHE_DISCARDERS __table ( struct cache_discarder, "cache_discarders" )
 
 /** Declare a cache discarder */
-#define __cache_discarder __table_entry ( CACHE_DISCARDERS, 01 )
+#define __cache_discarder( cost ) __table_entry ( CACHE_DISCARDERS, cost )
+
+/** @defgroup cache_cost Cache discarder costs
+ *
+ * @{
+ */
+
+#define CACHE_CHEAP	01	/**< Items with a low replacement cost */
+#define CACHE_NORMAL	02	/**< Items with a normal replacement cost */
+#define CACHE_EXPENSIVE	03	/**< Items with a high replacement cost */
+
+/** @} */
 
 #endif /* _IPXE_MALLOC_H */

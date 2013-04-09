@@ -14,7 +14,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  * As an alternative, at your option, you may use this file under the
  * following terms, known as the "MIT license":
@@ -1689,6 +1690,27 @@ struct s_PXENV_FILE_EXIT_HOOK {
 typedef struct s_PXENV_FILE_EXIT_HOOK PXENV_FILE_EXIT_HOOK_t;
 
 /** @} */ /* pxenv_file_exit_hook */
+
+/** @defgroup pxenv_file_cmdline PXENV_FILE_CMDLINE
+ *
+ * FILE CMDLINE
+ *
+ * @{
+ */
+
+/** PXE API function code for pxenv_file_cmdline() */
+#define PXENV_FILE_CMDLINE			0x00e8
+
+/** Parameter block for pxenv_file_cmdline() */
+struct s_PXENV_FILE_CMDLINE {
+	PXENV_STATUS_t Status;		/**< PXE status code */
+	UINT16_t BufferSize;		/**< Data buffer size */
+	SEGOFF16_t Buffer;		/**< Data buffer */
+} __attribute__ (( packed ));
+
+typedef struct s_PXENV_FILE_CMDLINE PXENV_FILE_CMDLINE_t;
+
+/** @} */ /* pxe_file_cmdline */
 
 /** @} */ /* pxe_file_api */
 

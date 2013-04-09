@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -194,6 +195,10 @@ int register_image ( struct image *image ) {
  */
 void unregister_image ( struct image *image ) {
 
+	/* Do nothing unless image is registered */
+	if ( ! ( image->flags & IMAGE_REGISTERED ) )
+		return;
+
 	DBGC ( image, "IMAGE %s unregistered\n", image->name );
 	list_del ( &image->list );
 	image->flags &= ~IMAGE_REGISTERED;
@@ -259,22 +264,12 @@ int image_probe ( struct image *image ) {
  */
 int image_exec ( struct image *image ) {
 	struct image *saved_current_image;
-	struct image *replacement;
+	struct image *replacement = NULL;
 	struct uri *old_cwuri;
 	int rc;
 
 	/* Sanity check */
 	assert ( image->flags & IMAGE_REGISTERED );
-
-	/* Check that this image can be selected for execution */
-	if ( ( rc = image_select ( image ) ) != 0 )
-		return rc;
-
-	/* Check that image is trusted (if applicable) */
-	if ( require_trusted_images && ! ( image->flags & IMAGE_TRUSTED ) ) {
-		DBGC ( image, "IMAGE %s is not trusted\n", image->name );
-		return -EACCES_UNTRUSTED;
-	}
 
 	/* Switch current working directory to be that of the image itself */
 	old_cwuri = uri_get ( cwuri );
@@ -288,6 +283,17 @@ int image_exec ( struct image *image ) {
 	 * automatically freeing itself.
 	 */
 	current_image = image_get ( image );
+
+	/* Check that this image can be selected for execution */
+	if ( ( rc = image_select ( image ) ) != 0 )
+		goto err;
+
+	/* Check that image is trusted (if applicable) */
+	if ( require_trusted_images && ! ( image->flags & IMAGE_TRUSTED ) ) {
+		DBGC ( image, "IMAGE %s is not trusted\n", image->name );
+		rc = -EACCES_UNTRUSTED;
+		goto err;
+	}
 
 	/* Record boot attempt */
 	syslog ( LOG_NOTICE, "Executing \"%s\"\n", image->name );
@@ -317,6 +323,19 @@ int image_exec ( struct image *image ) {
 	if ( replacement )
 		assert ( replacement->flags & IMAGE_REGISTERED );
 
+ err:
+	/* Unregister image if applicable */
+	if ( image->flags & IMAGE_AUTO_UNREGISTER )
+		unregister_image ( image );
+
+	/* Debug message for tail-recursion.  Placed here because the
+	 * image_put() may end up freeing the image.
+	 */
+	if ( replacement ) {
+		DBGC ( image, "IMAGE %s replacing self with IMAGE %s\n",
+		       image->name, replacement->name );
+	}
+
 	/* Drop temporary reference to the original image */
 	image_put ( image );
 
@@ -328,12 +347,8 @@ int image_exec ( struct image *image ) {
 	uri_put ( old_cwuri );
 
 	/* Tail-recurse into replacement image, if one exists */
-	if ( replacement ) {
-		DBGC ( image, "IMAGE <freed> replacing self with IMAGE %s\n",
-		       replacement->name );
-		if ( ( rc = image_exec ( replacement ) ) != 0 )
-			return rc;
-	}
+	if ( replacement )
+		return image_exec ( replacement );
 
 	return rc;
 }

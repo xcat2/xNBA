@@ -132,11 +132,23 @@ enum realtek_legacy_status {
 /** Interrupt Status Register (word) */
 #define RTL_ISR 0x3e
 
+/** Transmit (Tx) Configuration Register (dword) */
+#define RTL_TCR 0x40
+#define RTL_TCR_MXDMA(x)	( (x) << 8 ) /**< Max DMA burst size */
+#define RTL_TCR_MXDMA_MASK	RTL_TCR_MXDMA ( 0x7 )
+#define RTL_TCR_MXDMA_DEFAULT	RTL_TCR_MXDMA ( 0x7 /* Unlimited */ )
+
 /** Receive (Rx) Configuration Register (dword) */
 #define RTL_RCR 0x44
+#define RTL_RCR_RXFTH(x)	( (x) << 13 ) /**< Receive FIFO threshold */
+#define RTL_RCR_RXFTH_MASK	RTL_RCR_RXFTH ( 0x7 )
+#define RTL_RCR_RXFTH_DEFAULT	RTL_RCR_RXFTH ( 0x7 /* Whole packet */ )
 #define RTL_RCR_RBLEN(x)	( (x) << 11 ) /**< Receive buffer length */
 #define RTL_RCR_RBLEN_MASK	RTL_RCR_RBLEN ( 0x3 )
 #define RTL_RCR_RBLEN_DEFAULT	RTL_RCR_RBLEN ( 0 /* 8kB */ )
+#define RTL_RCR_MXDMA(x)	( (x) << 8 ) /**< Max DMA burst size */
+#define RTL_RCR_MXDMA_MASK	RTL_RCR_MXDMA ( 0x7 )
+#define RTL_RCR_MXDMA_DEFAULT	RTL_RCR_MXDMA ( 0x7 /* Unlimited */ )
 #define RTL_RCR_WRAP		0x00000080UL /**< Overrun receive buffer */
 #define RTL_RCR_9356SEL		0x00000040UL /**< EEPROM is a 93C56 */
 #define RTL_RCR_AB		0x00000008UL /**< Accept broadcast packets */
@@ -146,8 +158,9 @@ enum realtek_legacy_status {
 
 /** 93C46 (93C56) Command Register (byte) */
 #define RTL_9346CR 0x50
-#define RTL_9346CR_EEM1		0x80	/**< Mode select bit 1 */
-#define RTL_9346CR_EEM0		0x40	/**< Mode select bit 0 */
+#define RTL_9346CR_EEM(x)	( (x) << 6 ) /**< Mode select */
+#define RTL_9346CR_EEM_EEPROM	RTL_9346CR_EEM ( 0x2 ) /**< EEPROM mode */
+#define RTL_9346CR_EEM_NORMAL	RTL_9346CR_EEM ( 0x0 ) /**< Normal mode */
 #define RTL_9346CR_EECS		0x08	/**< Chip select */
 #define RTL_9346CR_EESK		0x04	/**< Clock */
 #define RTL_9346CR_EEDI		0x02	/**< Data in */

@@ -16,16 +16,6 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/refcnt.h>
 #include <ipxe/list.h>
 
-/** An X.509 bit string */
-struct x509_bit_string {
-	/** Data */
-	const void *data;
-	/** Length */
-	size_t len;
-	/** Unused bits at end of data */
-	unsigned int unused;
-};
-
 /** An X.509 serial number */
 struct x509_serial {
 	/** Raw serial number */
@@ -52,12 +42,22 @@ struct x509_validity {
 	struct x509_time not_after;
 };
 
+/** Margin of error allowed in X.509 response times
+ *
+ * We allow a generous margin of error: 12 hours to allow for the
+ * local time zone being non-GMT, plus 30 minutes to allow for general
+ * clock drift.
+ */
+#define X509_ERROR_MARGIN_TIME ( ( 12 * 60 + 30 ) * 60 )
+
 /** An X.509 certificate public key */
 struct x509_public_key {
-	/** Raw public key */
+	/** Raw public key information */
 	struct asn1_cursor raw;
 	/** Public key algorithm */
 	struct asn1_algorithm *algorithm;
+	/** Raw public key bit string */
+	struct asn1_bit_string raw_bits;
 };
 
 /** An X.509 certificate subject */
@@ -75,7 +75,7 @@ struct x509_signature {
 	/** Signature algorithm */
 	struct asn1_algorithm *algorithm;
 	/** Signature value */
-	struct x509_bit_string value;
+	struct asn1_bit_string value;
 };
 
 /** An X.509 certificate basic constraints set */
@@ -127,12 +127,15 @@ struct x509_extended_key_usage {
  */
 enum x509_extended_key_usage_bits {
 	X509_CODE_SIGNING = 0x0001,
+	X509_OCSP_SIGNING = 0x0002,
 };
 
 /** X.509 certificate OCSP responder */
 struct x509_ocsp_responder {
 	/** URI */
 	char *uri;
+	/** OCSP status is good */
+	int good;
 };
 
 /** X.509 certificate authority information access */
@@ -329,6 +332,9 @@ struct x509_root {
 
 extern int x509_certificate ( const void *data, size_t len,
 			      struct x509_certificate **cert );
+extern int x509_validate ( struct x509_certificate *cert,
+			   struct x509_certificate *issuer,
+			   time_t time, struct x509_root *root );
 
 extern struct x509_chain * x509_alloc_chain ( void );
 extern int x509_append ( struct x509_chain *chain,

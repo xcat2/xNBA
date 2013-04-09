@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -91,9 +92,9 @@ size_t freemem;
 /**
  * Heap size
  *
- * Currently fixed at 128kB.
+ * Currently fixed at 512kB.
  */
-#define HEAP_SIZE ( 128 * 1024 )
+#define HEAP_SIZE ( 512 * 1024 )
 
 /** The heap itself */
 static char heap[HEAP_SIZE] __attribute__ (( aligned ( __alignof__(void *) )));
@@ -192,12 +193,14 @@ static inline void valgrind_make_blocks_noaccess ( void ) {
  */
 static unsigned int discard_cache ( void ) {
 	struct cache_discarder *discarder;
-	unsigned int discarded = 0;
+	unsigned int discarded;
 
 	for_each_table_entry ( discarder, CACHE_DISCARDERS ) {
-		discarded += discarder->discard();
+		discarded = discarder->discard();
+		if ( discarded )
+			return discarded;
 	}
-	return discarded;
+	return 0;
 }
 
 /**
@@ -217,6 +220,7 @@ static void discard_all_cache ( void ) {
  *
  * @v size		Requested size
  * @v align		Physical alignment
+ * @v offset		Offset from physical alignment
  * @ret ptr		Memory block, or NULL
  *
  * Allocates a memory block @b physically aligned as requested.  No
@@ -224,7 +228,7 @@ static void discard_all_cache ( void ) {
  *
  * @c align must be a power of two.  @c size may not be zero.
  */
-void * alloc_memblock ( size_t size, size_t align ) {
+void * alloc_memblock ( size_t size, size_t align, size_t offset ) {
 	struct memory_block *block;
 	size_t align_mask;
 	size_t pre_size;
@@ -241,12 +245,13 @@ void * alloc_memblock ( size_t size, size_t align ) {
 	size = ( size + MIN_MEMBLOCK_SIZE - 1 ) & ~( MIN_MEMBLOCK_SIZE - 1 );
 	align_mask = ( align - 1 ) | ( MIN_MEMBLOCK_SIZE - 1 );
 
-	DBG ( "Allocating %#zx (aligned %#zx)\n", size, align );
+	DBG ( "Allocating %#zx (aligned %#zx+%zx)\n", size, align, offset );
 	while ( 1 ) {
 		/* Search through blocks for the first one with enough space */
 		list_for_each_entry ( block, &free_blocks, list ) {
-			pre_size = ( - virt_to_phys ( block ) ) & align_mask;
-			post_size = block->size - pre_size - size;
+			pre_size = ( ( offset - virt_to_phys ( block ) )
+				     & align_mask );
+			post_size = ( block->size - pre_size - size );
 			if ( post_size >= 0 ) {
 				/* Split block into pre-block, block, and
 				 * post-block.  After this split, the "pre"
@@ -415,7 +420,7 @@ void * realloc ( void *old_ptr, size_t new_size ) {
 	if ( new_size ) {
 		new_total_size = ( new_size +
 				   offsetof ( struct autosized_block, data ) );
-		new_block = alloc_memblock ( new_total_size, 1 );
+		new_block = alloc_memblock ( new_total_size, 1, 0 );
 		if ( ! new_block )
 			return NULL;
 		VALGRIND_MAKE_MEM_UNDEFINED ( new_block, offsetof ( struct autosized_block, data ) );

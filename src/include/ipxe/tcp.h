@@ -54,6 +54,31 @@ struct tcp_mss_option {
 /** Code for the TCP MSS option */
 #define TCP_OPTION_MSS 2
 
+/** TCP window scale option */
+struct tcp_window_scale_option {
+	uint8_t kind;
+	uint8_t length;
+	uint8_t scale;
+} __attribute__ (( packed ));
+
+/** Padded TCP window scale option (used for sending) */
+struct tcp_window_scale_padded_option {
+	uint8_t nop;
+	struct tcp_window_scale_option wsopt;
+} __attribute (( packed ));
+
+/** Code for the TCP window scale option */
+#define TCP_OPTION_WS 3
+
+/** Advertised TCP window scale
+ *
+ * Using a scale factor of 2**9 provides for a maximum window of 32MB,
+ * which is sufficient to allow Gigabit-speed transfers with a 200ms
+ * RTT.  The minimum advertised window is 512 bytes, which is still
+ * less than a single packet.
+ */
+#define TCP_RX_WINDOW_SCALE 9
+
 /** TCP timestamp option */
 struct tcp_timestamp_option {
 	uint8_t kind;
@@ -75,7 +100,9 @@ struct tcp_timestamp_padded_option {
 struct tcp_options {
 	/** MSS option, if present */
 	const struct tcp_mss_option *mssopt;
-	/** Timestampe option, if present */
+	/** Window scale option, if present */
+	const struct tcp_window_scale_option *wsopt;
+	/** Timestamp option, if present */
 	const struct tcp_timestamp_option *tsopt;
 };
 
@@ -260,29 +287,31 @@ struct tcp_options {
 /**
  * Maxmimum advertised TCP window size
  *
- * We estimate the TCP window size as the amount of free memory we
- * have.  This is not strictly accurate (since it ignores any space
- * already allocated as RX buffers), but it will do for now.
+ * The maximum bandwidth on any link is limited by
  *
- * Since we don't store out-of-order received packets, the
- * retransmission penalty is that the whole window contents must be
- * resent.  This suggests keeping the window size small, but bear in
- * mind that the maximum bandwidth on any link is limited to
+ *    max_bandwidth * round_trip_time = tcp_window
  *
- *    max_bandwidth = ( tcp_window / round_trip_time )
+ * Some rough expectations for achievable bandwidths over various
+ * links are:
  *
- * With a 48kB window, which probably accurately reflects our amount
- * of free memory, and a WAN RTT of say 200ms, this gives a maximum
- * bandwidth of 240kB/s.  This is sufficiently close to realistic that
- * we will need to be careful that our advertised window doesn't end
- * up limiting WAN download speeds.
+ *    a) Gigabit LAN: expected bandwidth 125MB/s, typical RTT 0.5ms,
+ *       minimum required window 64kB
  *
- * Finally, since the window goes into a 16-bit field and we cannot
- * actually use 65536, we use a window size of (65536-4) to ensure
- * that payloads remain dword-aligned.
+ *    b) Home Internet connection: expected bandwidth 10MB/s, typical
+ *       RTT 25ms, minimum required window 256kB
+ *
+ *    c) WAN: expected bandwidth 2MB/s, typical RTT 100ms, minimum
+ *       required window 200kB.
+ *
+ * The maximum possible value for the TCP window size is 1GB (using
+ * the maximum window scale of 2**14).  However, it is advisable to
+ * keep the window size as small as possible (without limiting
+ * bandwidth), since in the event of a lost packet the window size
+ * represents the maximum amount that will need to be retransmitted.
+ *
+ * We therefore choose a maximum window size of 256kB.
  */
-//#define TCP_MAX_WINDOW_SIZE	( 65536 - 4 )
-#define TCP_MAX_WINDOW_SIZE	8192
+#define TCP_MAX_WINDOW_SIZE	( 256 * 1024 )
 
 /**
  * Path MTU
@@ -316,6 +345,7 @@ struct tcp_options {
 	( MAX_LL_NET_HEADER_LEN +				\
 	  sizeof ( struct tcp_header ) +			\
 	  sizeof ( struct tcp_mss_option ) +			\
+	  sizeof ( struct tcp_window_scale_padded_option ) +	\
 	  sizeof ( struct tcp_timestamp_padded_option ) )
 
 /**

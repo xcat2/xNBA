@@ -62,6 +62,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_parseopt	       ( ERRFILE_CORE | 0x00160000 )
 #define ERRFILE_test		       ( ERRFILE_CORE | 0x00170000 )
 #define ERRFILE_xferbuf		       ( ERRFILE_CORE | 0x00180000 )
+#define ERRFILE_pending		       ( ERRFILE_CORE | 0x00190000 )
 
 #define ERRFILE_eisa		     ( ERRFILE_DRIVER | 0x00000000 )
 #define ERRFILE_isa		     ( ERRFILE_DRIVER | 0x00010000 )
@@ -260,6 +261,10 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_menu_ui		      ( ERRFILE_OTHER | 0x002c0000 )
 #define ERRFILE_menu_cmd	      ( ERRFILE_OTHER | 0x002d0000 )
 #define ERRFILE_validator	      ( ERRFILE_OTHER | 0x002e0000 )
+#define ERRFILE_ocsp		      ( ERRFILE_OTHER | 0x002f0000 )
+#define ERRFILE_nslookup	      ( ERRFILE_OTHER | 0x00300000 )
+#define ERRFILE_efi_snp_hii	      ( ERRFILE_OTHER | 0x00310000 )
+#define ERRFILE_readline	      ( ERRFILE_OTHER | 0x00320000 )
 
 /** @} */
 

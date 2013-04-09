@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -25,6 +26,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/uaccess.h>
 #include <ipxe/image.h>
 #include <ipxe/cms.h>
+#include <ipxe/validator.h>
+#include <ipxe/monojob.h>
 #include <usr/imgtrust.h>
 
 /** @file
@@ -46,6 +49,7 @@ int imgverify ( struct image *image, struct image *signature,
 	size_t len;
 	void *data;
 	struct cms_signature *sig;
+	struct cms_signer_info *info;
 	time_t now;
 	int rc;
 
@@ -69,6 +73,14 @@ int imgverify ( struct image *image, struct image *signature,
 	free ( data );
 	data = NULL;
 
+	/* Complete all certificate chains */
+	list_for_each_entry ( info, &sig->info, list ) {
+		if ( ( rc = create_validator ( &monojob, info->chain ) ) != 0 )
+			goto err_create_validator;
+		if ( ( rc = monojob_wait ( NULL ) ) != 0 )
+			goto err_validator_wait;
+	}
+
 	/* Use signature to verify image */
 	now = time ( NULL );
 	if ( ( rc = cms_verify ( sig, image->data, image->len,
@@ -86,6 +98,8 @@ int imgverify ( struct image *image, struct image *signature,
 	return 0;
 
  err_verify:
+ err_validator_wait:
+ err_create_validator:
 	cms_put ( sig );
  err_parse:
 	free ( data );

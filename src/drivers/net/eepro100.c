@@ -25,7 +25,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  *
  *              date       version  by      what
@@ -909,7 +910,7 @@ static void ifec_refill_rx_ring ( struct net_device *netdev )
  * Initial allocation & initialization of the rx ring.
  *
  * @v netdev  		Device of rx ring.
- * @ret rc    		Non-zero if error occured
+ * @ret rc    		Non-zero if error occurred
  */
 static int ifec_rx_setup ( struct net_device *netdev )
 {

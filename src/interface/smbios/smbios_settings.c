@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -111,24 +112,52 @@ static int smbios_fetch ( struct settings *settings __unused,
 
 	{
 		uint8_t buf[structure.header.len];
+		const void *raw;
+		union uuid uuid;
 
 		/* Read SMBIOS structure */
 		if ( ( rc = read_smbios_structure ( &structure, buf,
 						    sizeof ( buf ) ) ) != 0 )
 			return rc;
 
+		/* A tag length of zero indicates a string */
 		if ( tag_len == 0 ) {
-			/* String */
-			return read_smbios_string ( &structure,
-						    buf[tag_offset],
-						    data, len );
-		} else {
-			/* Raw data */
-			if ( len > tag_len )
-				len = tag_len;
-			memcpy ( data, &buf[tag_offset], len );
-			return tag_len;
+			if ( ( rc = read_smbios_string ( &structure,
+							 buf[tag_offset],
+							 data, len ) ) < 0 ) {
+				return rc;
+			}
+			if ( ! setting->type )
+				setting->type = &setting_type_string;
+			return rc;
 		}
+
+		/* Mangle UUIDs if necessary.  iPXE treats UUIDs as
+		 * being in network byte order (big-endian).  SMBIOS
+		 * specification version 2.6 states that UUIDs are
+		 * stored with little-endian values in the first three
+		 * fields; earlier versions did not specify an
+		 * endianness.  dmidecode assumes that the byte order
+		 * is little-endian if and only if the SMBIOS version
+		 * is 2.6 or higher; we match this behaviour.
+		 */
+		raw = &buf[tag_offset];
+		if ( ( setting->type == &setting_type_uuid ) &&
+		     ( tag_len == sizeof ( uuid ) ) &&
+		     ( smbios_version() >= SMBIOS_VERSION ( 2, 6 ) ) ) {
+			DBG ( "SMBIOS detected mangled UUID\n" );
+			memcpy ( &uuid, &buf[tag_offset], sizeof ( uuid ) );
+			uuid_mangle ( &uuid );
+			raw = &uuid;
+		}
+
+		/* Return data */
+		if ( len > tag_len )
+			len = tag_len;
+		memcpy ( data, raw, len );
+		if ( ! setting->type )
+			setting->type = &setting_type_hex;
+		return tag_len;
 	}
 }
 

@@ -13,12 +13,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
-#include <realmode.h>
+#include <getopt.h>
 #include <ipxe/command.h>
 #include <ipxe/parseopt.h>
+#include <ipxe/reboot.h>
 
 FILE_LICENCE ( GPL2_OR_LATER );
 
@@ -29,14 +31,20 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 /** "reboot" options */
-struct reboot_options {};
+struct reboot_options {
+	/** Perform a warm reboot */
+	int warm;
+};
 
 /** "reboot" option list */
-static struct option_descriptor reboot_opts[] = {};
+static struct option_descriptor reboot_opts[] = {
+	OPTION_DESC ( "warm", 'w', no_argument,
+		      struct reboot_options, warm, parse_flag ),
+};
 
 /** "reboot" command descriptor */
 static struct command_descriptor reboot_cmd =
-	COMMAND_DESC ( struct reboot_options, reboot_opts, 0, 0, "" );
+	COMMAND_DESC ( struct reboot_options, reboot_opts, 0, 0, "[--warm]" );
 
 /**
  * The "reboot" command
@@ -54,7 +62,7 @@ static int reboot_exec ( int argc, char **argv ) {
 		return rc;
 
 	/* Reboot system */
-	__asm__ __volatile__ ( REAL_CODE ( "ljmp $0xf000, $0xfff0" ) : : );
+	reboot ( opts.warm );
 
 	return 0;
 }

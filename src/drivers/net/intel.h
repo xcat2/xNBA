@@ -93,6 +93,7 @@ enum intel_descriptor_status {
 #define INTEL_IRQ_TXDW		0x00000001UL	/**< Transmit descriptor done */
 #define INTEL_IRQ_LSC		0x00000004UL	/**< Link status change */
 #define INTEL_IRQ_RXT0		0x00000080UL	/**< Receive timer */
+#define INTEL_IRQ_RXO		0x00000400UL	/**< Receive overrun */
 
 /** Interrupt Mask Set/Read Register */
 #define INTEL_IMS 0x000d0UL
@@ -169,6 +170,10 @@ enum intel_descriptor_status {
 
 /** Receive/Transmit Descriptor Tail (offset) */
 #define INTEL_xDT 0x18
+
+/** Receive/Transmit Descriptor Control (offset) */
+#define INTEL_xDCTL 0x28
+#define INTEL_xDCTL_ENABLE	0x02000000UL	/**< Queue enable */
 
 /** Receive Descriptor Head */
 #define INTEL_RDH ( INTEL_RD + INTEL_xDH )

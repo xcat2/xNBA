@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -32,6 +33,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/init.h>
 #include <ipxe/device.h>
 #include <ipxe/errortab.h>
+#include <ipxe/vlan.h>
 #include <ipxe/netdevice.h>
 
 /** @file
@@ -485,6 +487,7 @@ int register_netdev ( struct net_device *netdev ) {
  err_probe:
 	for_each_table_entry_continue_reverse ( driver, NET_DRIVERS )
 		driver->remove ( netdev );
+	clear_settings ( netdev_settings ( netdev ) );
 	unregister_settings ( netdev_settings ( netdev ) );
  err_register_settings:
 	return rc;
@@ -569,6 +572,7 @@ void unregister_netdev ( struct net_device *netdev ) {
 		driver->remove ( netdev );
 
 	/* Unregister per-netdev configuration settings */
+	clear_settings ( netdev_settings ( netdev ) );
 	unregister_settings ( netdev_settings ( netdev ) );
 
 	/* Remove from device list */
@@ -671,13 +675,6 @@ int net_tx ( struct io_buffer *iobuf, struct net_device *netdev,
 	struct ll_protocol *ll_protocol = netdev->ll_protocol;
 	int rc;
 
-	/* Force a poll on the netdevice to (potentially) clear any
-	 * backed-up TX completions.  This is needed on some network
-	 * devices to avoid excessive losses due to small TX ring
-	 * sizes.
-	 */
-	netdev_poll ( netdev );
-
 	/* Add link-layer header */
 	if ( ( rc = ll_protocol->push ( netdev, iobuf, ll_dest, ll_source,
 					net_protocol->net_proto ) ) != 0 ) {
@@ -750,13 +747,8 @@ void net_poll ( void ) {
 		if ( netdev_rx_frozen ( netdev ) )
 			continue;
 
-		/* Process at most one received packet.  Give priority
-		 * to getting packets out of the NIC over processing
-		 * the received packets, because we advertise a window
-		 * that assumes that we can receive packets from the
-		 * NIC faster than they arrive.
-		 */
-		if ( ( iobuf = netdev_rx_dequeue ( netdev ) ) ) {
+		/* Process all received packets */
+		while ( ( iobuf = netdev_rx_dequeue ( netdev ) ) ) {
 
 			DBGC2 ( netdev, "NETDEV %s processing %p (%p+%zx)\n",
 				netdev->name, iobuf, iobuf->data,
@@ -790,6 +782,28 @@ void net_poll ( void ) {
  */
 static void net_step ( struct process *process __unused ) {
 	net_poll();
+}
+
+/**
+ * Get the VLAN tag (when VLAN support is not present)
+ *
+ * @v netdev		Network device
+ * @ret tag		0, indicating that device is not a VLAN device
+ */
+__weak unsigned int vlan_tag ( struct net_device *netdev __unused ) {
+	return 0;
+}
+
+/**
+ * Identify VLAN device (when VLAN support is not present)
+ *
+ * @v trunk		Trunk network device
+ * @v tag		VLAN tag
+ * @ret netdev		VLAN device, if any
+ */
+__weak struct net_device * vlan_find ( struct net_device *trunk __unused,
+				       unsigned int tag __unused ) {
+	return NULL;
 }
 
 /** Networking stack process */

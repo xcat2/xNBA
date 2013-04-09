@@ -14,7 +14,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -41,6 +42,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/fcoe.h>
 #include <ipxe/vlan.h>
 #include <ipxe/bofm.h>
+#include <ipxe/nvsvpd.h>
+#include <ipxe/nvo.h>
 #include "hermon.h"
 
 /**
@@ -1363,7 +1366,7 @@ static void hermon_destroy_qp ( struct ib_device *ibdev,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector
+ * @v dest		Destination address vector
  * @v iobuf		I/O buffer
  * @v wqe		Send work queue entry
  * @ret opcode		Control opcode
@@ -1371,7 +1374,7 @@ static void hermon_destroy_qp ( struct ib_device *ibdev,
 static __attribute__ (( unused )) unsigned int
 hermon_fill_nop_send_wqe ( struct ib_device *ibdev __unused,
 			   struct ib_queue_pair *qp __unused,
-			   struct ib_address_vector *av __unused,
+			   struct ib_address_vector *dest __unused,
 			   struct io_buffer *iobuf __unused,
 			   union hermon_send_wqe *wqe ) {
 
@@ -1385,7 +1388,7 @@ hermon_fill_nop_send_wqe ( struct ib_device *ibdev __unused,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector
+ * @v dest		Destination address vector
  * @v iobuf		I/O buffer
  * @v wqe		Send work queue entry
  * @ret opcode		Control opcode
@@ -1393,7 +1396,7 @@ hermon_fill_nop_send_wqe ( struct ib_device *ibdev __unused,
 static unsigned int
 hermon_fill_ud_send_wqe ( struct ib_device *ibdev,
 			  struct ib_queue_pair *qp __unused,
-			  struct ib_address_vector *av,
+			  struct ib_address_vector *dest,
 			  struct io_buffer *iobuf,
 			  union hermon_send_wqe *wqe ) {
 	struct hermon *hermon = ib_get_drvdata ( ibdev );
@@ -1405,14 +1408,14 @@ hermon_fill_ud_send_wqe ( struct ib_device *ibdev,
 		     ud_address_vector.pd, HERMON_GLOBAL_PD,
 		     ud_address_vector.port_number, ibdev->port );
 	MLX_FILL_2 ( &wqe->ud.ud, 1,
-		     ud_address_vector.rlid, av->lid,
-		     ud_address_vector.g, av->gid_present );
+		     ud_address_vector.rlid, dest->lid,
+		     ud_address_vector.g, dest->gid_present );
 	MLX_FILL_1 ( &wqe->ud.ud, 2,
-		     ud_address_vector.max_stat_rate, hermon_rate ( av ) );
-	MLX_FILL_1 ( &wqe->ud.ud, 3, ud_address_vector.sl, av->sl );
-	memcpy ( &wqe->ud.ud.u.dwords[4], &av->gid, sizeof ( av->gid ) );
-	MLX_FILL_1 ( &wqe->ud.ud, 8, destination_qp, av->qpn );
-	MLX_FILL_1 ( &wqe->ud.ud, 9, q_key, av->qkey );
+		     ud_address_vector.max_stat_rate, hermon_rate ( dest ) );
+	MLX_FILL_1 ( &wqe->ud.ud, 3, ud_address_vector.sl, dest->sl );
+	memcpy ( &wqe->ud.ud.u.dwords[4], &dest->gid, sizeof ( dest->gid ) );
+	MLX_FILL_1 ( &wqe->ud.ud, 8, destination_qp, dest->qpn );
+	MLX_FILL_1 ( &wqe->ud.ud, 9, q_key, dest->qkey );
 	MLX_FILL_1 ( &wqe->ud.data[0], 0, byte_count, iob_len ( iobuf ) );
 	MLX_FILL_1 ( &wqe->ud.data[0], 1, l_key, hermon->lkey );
 	MLX_FILL_H ( &wqe->ud.data[0], 2,
@@ -1427,7 +1430,7 @@ hermon_fill_ud_send_wqe ( struct ib_device *ibdev,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector
+ * @v dest		Destination address vector
  * @v iobuf		I/O buffer
  * @v wqe		Send work queue entry
  * @ret opcode		Control opcode
@@ -1435,7 +1438,7 @@ hermon_fill_ud_send_wqe ( struct ib_device *ibdev,
 static unsigned int
 hermon_fill_mlx_send_wqe ( struct ib_device *ibdev,
 			   struct ib_queue_pair *qp,
-			   struct ib_address_vector *av,
+			   struct ib_address_vector *dest,
 			   struct io_buffer *iobuf,
 			   union hermon_send_wqe *wqe ) {
 	struct hermon *hermon = ib_get_drvdata ( ibdev );
@@ -1445,7 +1448,7 @@ hermon_fill_mlx_send_wqe ( struct ib_device *ibdev,
 	iob_populate ( &headers, &wqe->mlx.headers, 0,
 		       sizeof ( wqe->mlx.headers ) );
 	iob_reserve ( &headers, sizeof ( wqe->mlx.headers ) );
-	ib_push ( ibdev, &headers, qp, iob_len ( iobuf ), av );
+	ib_push ( ibdev, &headers, qp, iob_len ( iobuf ), dest );
 
 	/* Fill work queue entry */
 	MLX_FILL_1 ( &wqe->mlx.ctrl, 1, ds,
@@ -1453,10 +1456,10 @@ hermon_fill_mlx_send_wqe ( struct ib_device *ibdev,
 	MLX_FILL_5 ( &wqe->mlx.ctrl, 2,
 		     c, 0x03 /* generate completion */,
 		     icrc, 0 /* generate ICRC */,
-		     max_statrate, hermon_rate ( av ),
+		     max_statrate, hermon_rate ( dest ),
 		     slr, 0,
 		     v15, ( ( qp->ext_qpn == IB_QPN_SMI ) ? 1 : 0 ) );
-	MLX_FILL_1 ( &wqe->mlx.ctrl, 3, rlid, av->lid );
+	MLX_FILL_1 ( &wqe->mlx.ctrl, 3, rlid, dest->lid );
 	MLX_FILL_1 ( &wqe->mlx.data[0], 0,
 		     byte_count, iob_len ( &headers ) );
 	MLX_FILL_1 ( &wqe->mlx.data[0], 1, l_key, hermon->lkey );
@@ -1479,7 +1482,7 @@ hermon_fill_mlx_send_wqe ( struct ib_device *ibdev,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector
+ * @v dest		Destination address vector
  * @v iobuf		I/O buffer
  * @v wqe		Send work queue entry
  * @ret opcode		Control opcode
@@ -1487,7 +1490,7 @@ hermon_fill_mlx_send_wqe ( struct ib_device *ibdev,
 static unsigned int
 hermon_fill_rc_send_wqe ( struct ib_device *ibdev,
 			  struct ib_queue_pair *qp __unused,
-			  struct ib_address_vector *av __unused,
+			  struct ib_address_vector *dest __unused,
 			  struct io_buffer *iobuf,
 			  union hermon_send_wqe *wqe ) {
 	struct hermon *hermon = ib_get_drvdata ( ibdev );
@@ -1509,7 +1512,7 @@ hermon_fill_rc_send_wqe ( struct ib_device *ibdev,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector
+ * @v dest		Destination address vector
  * @v iobuf		I/O buffer
  * @v wqe		Send work queue entry
  * @ret opcode		Control opcode
@@ -1517,7 +1520,7 @@ hermon_fill_rc_send_wqe ( struct ib_device *ibdev,
 static unsigned int
 hermon_fill_eth_send_wqe ( struct ib_device *ibdev,
 			   struct ib_queue_pair *qp __unused,
-			   struct ib_address_vector *av __unused,
+			   struct ib_address_vector *dest __unused,
 			   struct io_buffer *iobuf,
 			   union hermon_send_wqe *wqe ) {
 	struct hermon *hermon = ib_get_drvdata ( ibdev );
@@ -1542,7 +1545,7 @@ hermon_fill_eth_send_wqe ( struct ib_device *ibdev,
 static unsigned int
 ( * hermon_fill_send_wqe[] ) ( struct ib_device *ibdev,
 			       struct ib_queue_pair *qp,
-			       struct ib_address_vector *av,
+			       struct ib_address_vector *dest,
 			       struct io_buffer *iobuf,
 			       union hermon_send_wqe *wqe ) = {
 	[IB_QPT_SMI] = hermon_fill_mlx_send_wqe,
@@ -1557,13 +1560,13 @@ static unsigned int
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector
+ * @v dest		Destination address vector
  * @v iobuf		I/O buffer
  * @ret rc		Return status code
  */
 static int hermon_post_send ( struct ib_device *ibdev,
 			      struct ib_queue_pair *qp,
-			      struct ib_address_vector *av,
+			      struct ib_address_vector *dest,
 			      struct io_buffer *iobuf ) {
 	struct hermon *hermon = ib_get_drvdata ( ibdev );
 	struct hermon_queue_pair *hermon_qp = ib_qp_get_drvdata ( qp );
@@ -1594,7 +1597,7 @@ static int hermon_post_send ( struct ib_device *ibdev,
 	assert ( qp->type < ( sizeof ( hermon_fill_send_wqe ) /
 			      sizeof ( hermon_fill_send_wqe[0] ) ) );
 	assert ( hermon_fill_send_wqe[qp->type] != NULL );
-	opcode = hermon_fill_send_wqe[qp->type] ( ibdev, qp, av, iobuf, wqe );
+	opcode = hermon_fill_send_wqe[qp->type] ( ibdev, qp, dest, iobuf, wqe );
 	barrier();
 	MLX_FILL_2 ( &wqe->ctrl, 0,
 		     opcode, opcode,
@@ -1676,9 +1679,10 @@ static int hermon_complete ( struct ib_device *ibdev,
 	struct ib_work_queue *wq;
 	struct ib_queue_pair *qp;
 	struct io_buffer *iobuf;
-	struct ib_address_vector recv_av;
+	struct ib_address_vector recv_dest;
+	struct ib_address_vector recv_source;
 	struct ib_global_route_header *grh;
-	struct ib_address_vector *av;
+	struct ib_address_vector *source;
 	unsigned int opcode;
 	unsigned long qpn;
 	int is_send;
@@ -1736,7 +1740,9 @@ static int hermon_complete ( struct ib_device *ibdev,
 		len = MLX_GET ( &cqe->normal, byte_cnt );
 		assert ( len <= iob_tailroom ( iobuf ) );
 		iob_put ( iobuf, len );
-		memset ( &recv_av, 0, sizeof ( recv_av ) );
+		memset ( &recv_dest, 0, sizeof ( recv_dest ) );
+		recv_dest.qpn = qpn;
+		memset ( &recv_source, 0, sizeof ( recv_source ) );
 		switch ( qp->type ) {
 		case IB_QPT_SMI:
 		case IB_QPT_GSI:
@@ -1745,28 +1751,32 @@ static int hermon_complete ( struct ib_device *ibdev,
 			grh = iobuf->data;
 			iob_pull ( iobuf, sizeof ( *grh ) );
 			/* Construct address vector */
-			av = &recv_av;
-			av->qpn = MLX_GET ( &cqe->normal, srq_rqpn );
-			av->lid = MLX_GET ( &cqe->normal, slid_smac47_32 );
-			av->sl = MLX_GET ( &cqe->normal, sl );
-			av->gid_present = MLX_GET ( &cqe->normal, g );
-			memcpy ( &av->gid, &grh->sgid, sizeof ( av->gid ) );
+			source = &recv_source;
+			source->qpn = MLX_GET ( &cqe->normal, srq_rqpn );
+			source->lid = MLX_GET ( &cqe->normal, slid_smac47_32 );
+			source->sl = MLX_GET ( &cqe->normal, sl );
+			recv_dest.gid_present = source->gid_present =
+				MLX_GET ( &cqe->normal, g );
+			memcpy ( &recv_dest.gid, &grh->dgid,
+				 sizeof ( recv_dest.gid ) );
+			memcpy ( &source->gid, &grh->sgid,
+				 sizeof ( source->gid ) );
 			break;
 		case IB_QPT_RC:
-			av = &qp->av;
+			source = &qp->av;
 			break;
 		case IB_QPT_ETH:
 			/* Construct address vector */
-			av = &recv_av;
-			av->vlan_present = MLX_GET ( &cqe->normal, vlan );
-			av->vlan = MLX_GET ( &cqe->normal, vid );
+			source = &recv_source;
+			source->vlan_present = MLX_GET ( &cqe->normal, vlan );
+			source->vlan = MLX_GET ( &cqe->normal, vid );
 			break;
 		default:
 			assert ( 0 );
 			return -EINVAL;
 		}
 		/* Hand off to completion handler */
-		ib_complete_recv ( ibdev, qp, av, iobuf, rc );
+		ib_complete_recv ( ibdev, qp, &recv_dest, source, iobuf, rc );
 	}
 
 	return rc;
@@ -3127,6 +3137,11 @@ static int hermon_eth_transmit ( struct net_device *netdev,
 	return 0;
 }
 
+/** Hermon Ethernet queue pair operations */
+static struct ib_queue_pair_operations hermon_eth_qp_op = {
+	.alloc_iob = alloc_iob,
+};
+
 /**
  * Handle Hermon Ethernet device send completion
  *
@@ -3148,20 +3163,22 @@ static void hermon_eth_complete_send ( struct ib_device *ibdev __unused,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector, or NULL
+ * @v dest		Destination address vector, or NULL
+ * @v source		Source address vector, or NULL
  * @v iobuf		I/O buffer
  * @v rc		Completion status code
  */
 static void hermon_eth_complete_recv ( struct ib_device *ibdev __unused,
 				       struct ib_queue_pair *qp,
-				       struct ib_address_vector *av,
+				       struct ib_address_vector *dest __unused,
+				       struct ib_address_vector *source,
 				       struct io_buffer *iobuf, int rc ) {
 	struct net_device *netdev = ib_qp_get_ownerdata ( qp );
 	struct net_device *vlan;
 
 	/* Find VLAN device, if applicable */
-	if ( av->vlan_present ) {
-		if ( ( vlan = vlan_find ( netdev, av->vlan ) ) != NULL ) {
+	if ( source->vlan_present ) {
+		if ( ( vlan = vlan_find ( netdev, source->vlan ) ) != NULL ) {
 			netdev = vlan;
 		} else if ( rc == 0 ) {
 			rc = -ENODEV;
@@ -3224,7 +3241,8 @@ static int hermon_eth_open ( struct net_device *netdev ) {
 	/* Allocate queue pair */
 	port->eth_qp = ib_create_qp ( ibdev, IB_QPT_ETH,
 				      HERMON_ETH_NUM_SEND_WQES, port->eth_cq,
-				      HERMON_ETH_NUM_RECV_WQES, port->eth_cq );
+				      HERMON_ETH_NUM_RECV_WQES, port->eth_cq,
+				      &hermon_eth_qp_op );
 	if ( ! port->eth_qp ) {
 		DBGC ( hermon, "Hermon %p port %d could not create queue "
 		       "pair\n", hermon, ibdev->port );
@@ -3367,7 +3385,7 @@ static int hermon_register_netdev ( struct hermon *hermon,
 					    &query_port ) ) != 0 ) {
 		DBGC ( hermon, "Hermon %p port %d could not query port: %s\n",
 		       hermon, ibdev->port, strerror ( rc ) );
-		return rc;
+		goto err_query_port;
 	}
 	mac.dwords[0] = htonl ( MLX_GET ( &query_port, mac_47_32 ) );
 	mac.dwords[1] = htonl ( MLX_GET ( &query_port, mac_31_0 ) );
@@ -3378,10 +3396,26 @@ static int hermon_register_netdev ( struct hermon *hermon,
 	if ( ( rc = register_netdev ( netdev ) ) != 0 ) {
 		DBGC ( hermon, "Hermon %p port %d could not register network "
 		       "device: %s\n", hermon, ibdev->port, strerror ( rc ) );
-		return rc;
+		goto err_register_netdev;
+	}
+
+	/* Register non-volatile options */
+	if ( ( rc = register_nvo ( &port->nvo,
+				   netdev_settings ( netdev ) ) ) != 0 ) {
+		DBGC ( hermon, "Hermon %p port %d could not register non-"
+		       "volatile options: %s\n",
+		       hermon, ibdev->port, strerror ( rc ) );
+		goto err_register_nvo;
 	}
 
 	return 0;
+
+	unregister_nvo ( &port->nvo );
+ err_register_nvo:
+	unregister_netdev ( netdev );
+ err_register_netdev:
+ err_query_port:
+	return rc;
 }
 
 /**
@@ -3413,6 +3447,7 @@ static void hermon_unregister_netdev ( struct hermon *hermon __unused,
 				       struct hermon_port *port ) {
 	struct net_device *netdev = port->netdev;
 
+	unregister_nvo ( &port->nvo );
 	unregister_netdev ( netdev );
 }
 
@@ -3804,6 +3839,15 @@ static int hermon_probe ( struct pci_device *pci ) {
 		port = &hermon->port[i];
 		if ( ( rc = hermon_set_port_type ( hermon, port ) ) != 0 )
 			goto err_set_port_type;
+	}
+
+	/* Initialise non-volatile storage */
+	nvs_vpd_init ( &hermon->nvsvpd, pci );
+	for ( i = 0 ; i < hermon->cap.num_ports ; i++ ) {
+		port = &hermon->port[i];
+		nvs_vpd_nvo_init ( &hermon->nvsvpd,
+				   HERMON_VPD_FIELD ( port->ibdev->port ),
+				   &port->nvo, NULL );
 	}
 
 	/* Register devices */

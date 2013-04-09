@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -54,11 +55,16 @@ void base64_encode ( const uint8_t *raw, size_t len, char *encoded ) {
 	uint8_t *encoded_bytes = ( ( uint8_t * ) encoded );
 	size_t raw_bit_len = ( 8 * len );
 	unsigned int bit;
+	unsigned int byte;
+	unsigned int shift;
 	unsigned int tmp;
 
 	for ( bit = 0 ; bit < raw_bit_len ; bit += 6 ) {
-		tmp = ( ( raw_bytes[ bit / 8 ] << ( bit % 8 ) ) |
-			( raw_bytes[ bit / 8 + 1 ] >> ( 8 - ( bit % 8 ) ) ) );
+		byte = ( bit / 8 );
+		shift = ( bit % 8 );
+		tmp = ( raw_bytes[byte] << shift );
+		if ( ( byte + 1 ) < len )
+			tmp |= ( raw_bytes[ byte + 1 ] >> ( 8 - shift ) );
 		tmp = ( ( tmp >> 2 ) & 0x3f );
 		*(encoded_bytes++) = base64[tmp];
 	}

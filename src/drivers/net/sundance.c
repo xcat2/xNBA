@@ -15,7 +15,8 @@
 *
 *    You should have received a copy of the GNU General Public License
 *    along with this program; if not, write to the Free Software
-*    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+*    02110-1301, USA.
 *
 *    Portions of this code based on:
 *               sundance.c: A Linux device driver for the Sundance ST201 "Alta"
@@ -257,7 +258,7 @@ static struct sundance_private {
 	const char *nic_name;
 	/* Frequently used values */
 
-	unsigned int cur_rx;	/* Producer/consumer ring indicies */
+	unsigned int cur_rx;	/* Producer/consumer ring indices */
 	unsigned int mtu;
 
 	/* These values keep track of the tranceiver/media in use */
@@ -440,7 +441,7 @@ static void sundance_irq ( struct nic *nic, irq_action_t action ) {
 /**************************************************************************
 POLL - Wait for a frame
 ***************************************************************************/
-static int sundance_poll(struct nic *nic, int retreive)
+static int sundance_poll(struct nic *nic, int retrieve)
 {
 	/* return true if there's an ethernet packet ready to read */
 	/* nic->packet should contain data on return */
@@ -454,7 +455,7 @@ static int sundance_poll(struct nic *nic, int retreive)
 		return 0;
 
 	/* There is a packet ready */
-	if(!retreive)
+	if(!retrieve)
 		return 1;
 
 	intr_status = inw(nic->ioaddr + IntrStatus);

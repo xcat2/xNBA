@@ -100,6 +100,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 //#define	IMAGE_BZIMAGE		/* Linux bzImage image support */
 #undef	IMAGE_COMBOOT		/* SYSLINUX COMBOOT image support */
 //#define	IMAGE_EFI		/* EFI image support */
+//#define	IMAGE_SDI		/* SDI image support */
 
 /*
  * Command-line commands to include
@@ -124,6 +125,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #undef	PXE_CMD			/* PXE commands */
 #undef	REBOOT_CMD		/* Reboot command */
 #define IMAGE_TRUST_CMD	/* Image trust management commands */
+#undef  SYNC_CMD		/* Sync command */
+#undef  NSLOOKUP_CMD		/* DNS resolving command */
 
 /*
  * ROM-specific options

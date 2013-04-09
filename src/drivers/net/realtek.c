@@ -60,8 +60,34 @@ static const uint8_t realtek_eeprom_bits[] = {
 	[SPI_BIT_SCLK]	= RTL_9346CR_EESK,
 	[SPI_BIT_MOSI]	= RTL_9346CR_EEDI,
 	[SPI_BIT_MISO]	= RTL_9346CR_EEDO,
-	[SPI_BIT_SS(0)]	= ( RTL_9346CR_EECS | RTL_9346CR_EEM1 ),
+	[SPI_BIT_SS(0)]	= RTL_9346CR_EECS,
 };
+
+/**
+ * Open bit-bashing interface
+ *
+ * @v basher		Bit-bashing interface
+ */
+static void realtek_spi_open_bit ( struct bit_basher *basher ) {
+	struct realtek_nic *rtl = container_of ( basher, struct realtek_nic,
+						 spibit.basher );
+
+	/* Enable EEPROM access */
+	writeb ( RTL_9346CR_EEM_EEPROM, rtl->regs + RTL_9346CR );
+}
+
+/**
+ * Close bit-bashing interface
+ *
+ * @v basher		Bit-bashing interface
+ */
+static void realtek_spi_close_bit ( struct bit_basher *basher ) {
+	struct realtek_nic *rtl = container_of ( basher, struct realtek_nic,
+						 spibit.basher );
+
+	/* Disable EEPROM access */
+	writeb ( RTL_9346CR_EEM_NORMAL, rtl->regs + RTL_9346CR );
+}
 
 /**
  * Read input bit
@@ -108,6 +134,8 @@ static void realtek_spi_write_bit ( struct bit_basher *basher,
 
 /** SPI bit-bashing interface */
 static struct bit_basher_operations realtek_basher_ops = {
+	.open = realtek_spi_open_bit,
+	.close = realtek_spi_close_bit,
 	.read = realtek_spi_read_bit,
 	.write = realtek_spi_write_bit,
 };
@@ -272,6 +300,75 @@ static int realtek_reset ( struct realtek_nic *rtl ) {
 	return -ETIMEDOUT;
 }
 
+/**
+ * Configure PHY for Gigabit operation
+ *
+ * @v rtl		Realtek device
+ * @ret rc		Return status code
+ */
+static int realtek_phy_speed ( struct realtek_nic *rtl ) {
+	int ctrl1000;
+	int rc;
+
+	/* Read CTRL1000 register */
+	ctrl1000 = mii_read ( &rtl->mii, MII_CTRL1000 );
+	if ( ctrl1000 < 0 ) {
+		rc = ctrl1000;
+		DBGC ( rtl, "REALTEK %p could not read CTRL1000: %s\n",
+		       rtl, strerror ( rc ) );
+		return rc;
+	}
+
+	/* Advertise 1000Mbps speeds */
+	ctrl1000 |= ( ADVERTISE_1000FULL | ADVERTISE_1000HALF );
+	if ( ( rc = mii_write ( &rtl->mii, MII_CTRL1000, ctrl1000 ) ) != 0 ) {
+		DBGC ( rtl, "REALTEK %p could not write CTRL1000: %s\n",
+		       rtl, strerror ( rc ) );
+		return rc;
+	}
+
+	return 0;
+}
+
+/**
+ * Reset PHY
+ *
+ * @v rtl		Realtek device
+ * @ret rc		Return status code
+ */
+static int realtek_phy_reset ( struct realtek_nic *rtl ) {
+	int rc;
+
+	/* Do nothing if we have no separate PHY register access */
+	if ( ! rtl->have_phy_regs )
+		return 0;
+
+	/* Perform MII reset */
+	if ( ( rc = mii_reset ( &rtl->mii ) ) != 0 ) {
+		DBGC ( rtl, "REALTEK %p could not reset MII: %s\n",
+		       rtl, strerror ( rc ) );
+		return rc;
+	}
+
+	/* Some cards (e.g. RTL8169SC) do not advertise Gigabit by
+	 * default.  Try to enable advertisement of Gigabit speeds.
+	 */
+	if ( ( rc = realtek_phy_speed ( rtl ) ) != 0 ) {
+		/* Ignore failures, since the register may not be
+		 * present on non-Gigabit PHYs (e.g. RTL8101).
+		 */
+	}
+
+	/* Restart autonegotiation */
+	if ( ( rc = mii_restart ( &rtl->mii ) ) != 0 ) {
+		DBGC ( rtl, "REALTEK %p could not restart MII: %s\n",
+		       rtl, strerror ( rc ) );
+		return rc;
+	}
+
+	return 0;
+}
+
 /******************************************************************************
  *
  * Link state
@@ -409,11 +506,9 @@ static int realtek_create_ring ( struct realtek_nic *rtl,
 
 	/* Program ring address */
 	address = virt_to_bus ( ring->desc );
+	writel ( ( ( ( uint64_t ) address ) >> 32 ),
+		 rtl->regs + ring->reg + 4 );
 	writel ( ( address & 0xffffffffUL ), rtl->regs + ring->reg );
-	if ( sizeof ( physaddr_t ) > sizeof ( uint32_t ) ) {
-		writel ( ( ( ( uint64_t ) address ) >> 32 ),
-			 rtl->regs + ring->reg + 4 );
-	}
 	DBGC ( rtl, "REALTEK %p ring %02x is at [%08llx,%08llx)\n",
 	       rtl, ring->reg, ( ( unsigned long long ) address ),
 	       ( ( unsigned long long ) address + ring->len ) );
@@ -478,7 +573,7 @@ static void realtek_refill_rx ( struct realtek_nic *rtl ) {
 		/* Populate receive descriptor */
 		address = virt_to_bus ( iobuf->data );
 		rx->address = cpu_to_le64 ( address );
-		rx->length = RTL_RX_MAX_LEN;
+		rx->length = cpu_to_le16 ( RTL_RX_MAX_LEN );
 		wmb();
 		rx->flags = ( cpu_to_le16 ( RTL_DESC_OWN ) |
 			      ( is_last ? cpu_to_le16 ( RTL_DESC_EOR ) : 0 ) );
@@ -502,6 +597,7 @@ static void realtek_refill_rx ( struct realtek_nic *rtl ) {
  */
 static int realtek_open ( struct net_device *netdev ) {
 	struct realtek_nic *rtl = netdev->priv;
+	uint32_t tcr;
 	uint32_t rcr;
 	int rc;
 
@@ -526,10 +622,18 @@ static int realtek_open ( struct net_device *netdev ) {
 	 */
 	writeb ( ( RTL_CR_TE | RTL_CR_RE ), rtl->regs + RTL_CR );
 
+	/* Configure transmitter */
+	tcr = readl ( rtl->regs + RTL_TCR );
+	tcr &= ~RTL_TCR_MXDMA_MASK;
+	tcr |= RTL_TCR_MXDMA_DEFAULT;
+	writel ( tcr, rtl->regs + RTL_TCR );
+
 	/* Configure receiver */
 	rcr = readl ( rtl->regs + RTL_RCR );
-	rcr &= ~( RTL_RCR_RBLEN_MASK );
-	rcr |= ( RTL_RCR_RBLEN_DEFAULT | RTL_RCR_WRAP | RTL_RCR_AB |
+	rcr &= ~( RTL_RCR_RXFTH_MASK | RTL_RCR_RBLEN_MASK |
+		  RTL_RCR_MXDMA_MASK );
+	rcr |= ( RTL_RCR_RXFTH_DEFAULT | RTL_RCR_RBLEN_DEFAULT |
+		 RTL_RCR_MXDMA_DEFAULT | RTL_RCR_WRAP | RTL_RCR_AB |
 		 RTL_RCR_AM | RTL_RCR_APM | RTL_RCR_AAP );
 	writel ( rcr, rtl->regs + RTL_RCR );
 
@@ -871,9 +975,15 @@ static void realtek_detect ( struct realtek_nic *rtl ) {
 	/* The C+ Command register is present only on 8169 and 8139C+.
 	 * Try to enable C+ mode and PCI Dual Address Cycle (for
 	 * 64-bit systems), if supported.
+	 *
+	 * Note that enabling DAC seems to cause bizarre behaviour
+	 * (lockups, garbage data on the wire) on some systems, even
+	 * if only 32-bit addresses are used.
 	 */
-	cpcr = ( RTL_CPCR_DAC | RTL_CPCR_MULRW | RTL_CPCR_CPRX |
-		 RTL_CPCR_CPTX );
+	cpcr = readw ( rtl->regs + RTL_CPCR );
+	cpcr |= ( RTL_CPCR_MULRW | RTL_CPCR_CPRX | RTL_CPCR_CPTX );
+	if ( sizeof ( physaddr_t ) > sizeof ( uint32_t ) )
+		cpcr |= RTL_CPCR_DAC;
 	writew ( cpcr, rtl->regs + RTL_CPCR );
 	check_cpcr = readw ( rtl->regs + RTL_CPCR );
 
@@ -883,7 +993,7 @@ static void realtek_detect ( struct realtek_nic *rtl ) {
 		rtl->have_phy_regs = 1;
 		rtl->tppoll = RTL_TPPOLL_8169;
 	} else {
-		if ( check_cpcr == cpcr ) {
+		if ( ( check_cpcr == cpcr ) && ( cpcr != 0xffff ) ) {
 			DBGC ( rtl, "REALTEK %p appears to be an RTL8139C+\n",
 			       rtl );
 			rtl->tppoll = RTL_TPPOLL_8139CP;
@@ -957,12 +1067,8 @@ static int realtek_probe ( struct pci_device *pci ) {
 
 	/* Initialise and reset MII interface */
 	mii_init ( &rtl->mii, &realtek_mii_operations );
-	if ( rtl->have_phy_regs &&
-	     ( ( rc = mii_reset ( &rtl->mii ) ) != 0 ) ) {
-		DBGC ( rtl, "REALTEK %p could not reset MII: %s\n",
-		       rtl, strerror ( rc ) );
-		goto err_mii_reset;
-	}
+	if ( ( rc = realtek_phy_reset ( rtl ) ) != 0 )
+		goto err_phy_reset;
 
 	/* Register network device */
 	if ( ( rc = register_netdev ( netdev ) ) != 0 )
@@ -983,10 +1089,11 @@ static int realtek_probe ( struct pci_device *pci ) {
  err_register_nvo:
 	unregister_netdev ( netdev );
  err_register_netdev:
- err_mii_reset:
+ err_phy_reset:
  err_nvs_read:
 	realtek_reset ( rtl );
  err_reset:
+	iounmap ( rtl->regs );
 	netdev_nullify ( netdev );
 	netdev_put ( netdev );
  err_alloc:
@@ -1013,6 +1120,7 @@ static void realtek_remove ( struct pci_device *pci ) {
 	realtek_reset ( rtl );
 
 	/* Free network device */
+	iounmap ( rtl->regs );
 	netdev_nullify ( netdev );
 	netdev_put ( netdev );
 }

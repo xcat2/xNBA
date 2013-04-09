@@ -5,7 +5,7 @@
   If a code construct is defined in the UEFI 2.3 specification it must be included
   by this include file.
 
-Copyright (c) 2006 - 2011, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2006 - 2012, Intel Corporation. All rights reserved.<BR>
 This program and the accompanying materials are licensed and made available under
 the terms and conditions of the BSD License that accompanies this distribution.
 The full text of the license may be found at
@@ -25,6 +25,7 @@ FILE_LICENCE ( BSD3 );
 
 #include <ipxe/efi/Protocol/DevicePath.h>
 #include <ipxe/efi/Protocol/SimpleTextIn.h>
+#include <ipxe/efi/Protocol/SimpleTextInEx.h>
 #include <ipxe/efi/Protocol/SimpleTextOut.h>
 
 ///
@@ -128,6 +129,7 @@ typedef struct {
   @retval EFI_INVALID_PARAMETER 1) Type is not AllocateAnyPages or
                                 AllocateMaxAddress or AllocateAddress.
                                 2) MemoryType is in the range
+                                3) Memory is NULL.
                                 EfiMaxMemoryType..0x7FFFFFFF.
   @retval EFI_OUT_OF_RESOURCES  The pages could not be allocated.
   @retval EFI_NOT_FOUND         The requested pages could not be found.
@@ -206,7 +208,7 @@ EFI_STATUS
 
   @retval EFI_SUCCESS           The requested number of bytes was allocated.
   @retval EFI_OUT_OF_RESOURCES  The pool requested could not be allocated.
-  @retval EFI_INVALID_PARAMETER PoolType was invalid.
+  @retval EFI_INVALID_PARAMETER PoolType was invalid or Buffer is NULL.
 
 **/
 typedef
@@ -277,11 +279,13 @@ EFI_STATUS
                                 2) No drivers were connected to ControllerHandle, but
                                 RemainingDevicePath is not NULL, and it is an End Device
                                 Path Node.
-  @retval EFI_INVALID_PARAMETER ControllerHandle is not a valid EFI_HANDLE.
+  @retval EFI_INVALID_PARAMETER ControllerHandle is NULL.
   @retval EFI_NOT_FOUND         1) There are no EFI_DRIVER_BINDING_PROTOCOL instances
                                 present in the system.
                                 2) No drivers were connected to ControllerHandle.
-
+  @retval EFI_SECURITY_VIOLATION
+                                The user has no permission to start UEFI device drivers on the device path
+                                associated with the ControllerHandle or specified by the RemainingDevicePath.
 **/
 typedef
 EFI_STATUS
@@ -307,7 +311,7 @@ EFI_STATUS
                                 2) On entry, no drivers are managing ControllerHandle.
                                 3) DriverImageHandle is not NULL, and on entry
                                    DriverImageHandle is not managing ControllerHandle.
-  @retval EFI_INVALID_PARAMETER 1) ControllerHandle is not a valid EFI_HANDLE.
+  @retval EFI_INVALID_PARAMETER 1) ControllerHandle is NULL.
                                 2) DriverImageHandle is not NULL, and it is not a valid EFI_HANDLE.
                                 3) ChildHandle is not NULL, and it is not a valid EFI_HANDLE.
                                 4) DriverImageHandle does not support the EFI_DRIVER_BINDING_PROTOCOL.
@@ -848,8 +852,9 @@ EFI_STATUS
   @param  ExitData              The pointer to a pointer to a data buffer that includes a Null-terminated
                                 string, optionally followed by additional binary data.
 
-  @retval EFI_INVALID_PARAMETER ImageHandle is either an invalid image handle or the image
-                                has already been initialized with StartImage.
+  @retval EFI_INVALID_PARAMETER  ImageHandle is either an invalid image handle or the image
+                                 has already been initialized with StartImage.
+  @retval EFI_SECURITY_VIOLATION The current platform policy specifies that the image should not be started.
   @return Exit code from image
 
 **/
@@ -1136,8 +1141,8 @@ EFI_STATUS
 /**
   Installs one or more protocol interfaces into the boot services environment.
 
-  @param  Handle                The handle to install the new protocol interfaces on, or NULL if a new
-                                handle is to be allocated.
+  @param  Handle                The pointer to a handle to install the new protocol interfaces on,
+                                or a pointer to NULL if a new handle is to be allocated.
   @param  ...                   A variable argument list containing pairs of protocol GUIDs and protocol
                                 interfaces.
 
@@ -1168,7 +1173,7 @@ EFI_STATUS
   @retval EFI_ACCESS_DENIED     The protocol interface could not be reinstalled,
                                 because OldInterface is still being used by a
                                 driver that will not release it.
-  @retval EFI_INVALID_PARAMETER Handle is not a valid EFI_HANDLE.
+  @retval EFI_INVALID_PARAMETER Handle is NULL.
   @retval EFI_INVALID_PARAMETER Protocol is NULL.
 
 **/
@@ -1194,7 +1199,7 @@ EFI_STATUS
   @retval EFI_NOT_FOUND         The interface was not found.
   @retval EFI_ACCESS_DENIED     The interface was not removed because the interface
                                 is still being used by a driver.
-  @retval EFI_INVALID_PARAMETER Handle is not a valid EFI_HANDLE.
+  @retval EFI_INVALID_PARAMETER Handle is NULL.
   @retval EFI_INVALID_PARAMETER Protocol is NULL.
 
 **/
@@ -1234,7 +1239,7 @@ EFI_STATUS
 
   @retval EFI_SUCCESS           The interface information for the specified protocol was returned.
   @retval EFI_UNSUPPORTED       The device does not support the specified protocol.
-  @retval EFI_INVALID_PARAMETER Handle is not a valid EFI_HANDLE.
+  @retval EFI_INVALID_PARAMETER Handle is NULL.
   @retval EFI_INVALID_PARAMETER Protocol is NULL.
   @retval EFI_INVALID_PARAMETER Interface is NULL.
 
@@ -1305,8 +1310,8 @@ EFI_STATUS
                                 that required the protocol interface.
 
   @retval EFI_SUCCESS           The protocol instance was closed.
-  @retval EFI_INVALID_PARAMETER 1) Handle is not a valid EFI_HANDLE.
-                                2) AgentHandle is not a valid EFI_HANDLE.
+  @retval EFI_INVALID_PARAMETER 1) Handle is NULL.
+                                2) AgentHandle is NULL.
                                 3) ControllerHandle is not NULL and ControllerHandle is not a valid EFI_HANDLE.
                                 4) Protocol is NULL.
   @retval EFI_NOT_FOUND         1) Handle does not support the protocol specified by Protocol.
@@ -1493,7 +1498,7 @@ EFI_STATUS
 
   @retval EFI_SUCCESS           The (Guid, Table) pair was added, updated, or removed.
   @retval EFI_NOT_FOUND         An attempt was made to delete a nonexistent entry.
-  @retval EFI_INVALID_PARAMETER Guid is not valid.
+  @retval EFI_INVALID_PARAMETER Guid is NULL.
   @retval EFI_OUT_OF_RESOURCES  There is not enough memory available to complete the operation.
 
 **/
@@ -1720,21 +1725,26 @@ EFI_STATUS
   OUT UINT64            *MaximumVariableSize
   );
 
+//
+// Firmware should stop at a firmware user interface on next boot
+//
+#define EFI_OS_INDICATIONS_BOOT_TO_FW_UI    0x0000000000000001
 
 //
 // EFI Runtime Services Table
 //
 #define EFI_SYSTEM_TABLE_SIGNATURE      SIGNATURE_64 ('I','B','I',' ','S','Y','S','T')
+#define EFI_2_31_SYSTEM_TABLE_REVISION  ((2 << 16) | (31))
 #define EFI_2_30_SYSTEM_TABLE_REVISION  ((2 << 16) | (30))
 #define EFI_2_20_SYSTEM_TABLE_REVISION  ((2 << 16) | (20))
 #define EFI_2_10_SYSTEM_TABLE_REVISION  ((2 << 16) | (10))
 #define EFI_2_00_SYSTEM_TABLE_REVISION  ((2 << 16) | (00))
 #define EFI_1_10_SYSTEM_TABLE_REVISION  ((1 << 16) | (10))
 #define EFI_1_02_SYSTEM_TABLE_REVISION  ((1 << 16) | (02))
-#define EFI_SYSTEM_TABLE_REVISION       EFI_2_30_SYSTEM_TABLE_REVISION
+#define EFI_SYSTEM_TABLE_REVISION       EFI_2_31_SYSTEM_TABLE_REVISION
 
 #define EFI_RUNTIME_SERVICES_SIGNATURE  SIGNATURE_64 ('R','U','N','T','S','E','R','V')
-#define EFI_RUNTIME_SERVICES_REVISION   EFI_2_30_SYSTEM_TABLE_REVISION
+#define EFI_RUNTIME_SERVICES_REVISION   EFI_2_31_SYSTEM_TABLE_REVISION
 
 ///
 /// EFI Runtime Services Table.
@@ -1786,7 +1796,7 @@ typedef struct {
 
 
 #define EFI_BOOT_SERVICES_SIGNATURE   SIGNATURE_64 ('B','O','O','T','S','E','R','V')
-#define EFI_BOOT_SERVICES_REVISION    EFI_2_30_SYSTEM_TABLE_REVISION
+#define EFI_BOOT_SERVICES_REVISION    EFI_2_31_SYSTEM_TABLE_REVISION
 
 ///
 /// EFI Boot Services Table.
@@ -2003,50 +2013,46 @@ EFI_STATUS
 ///
 /// EFI Boot Key Data
 ///
-typedef union {
-  struct {
-    ///
-    /// Indicates the revision of the EFI_KEY_OPTION structure. This revision level should be 0.
-    ///
-    UINT32  Revision        : 8;
-    ///
-    /// Either the left or right Shift keys must be pressed (1) or must not be pressed (0).
-    ///
-    UINT32  ShiftPressed    : 1;
-    ///
-    /// Either the left or right Control keys must be pressed (1) or must not be pressed (0).
-    ///
-    UINT32  ControlPressed  : 1;
-    ///
-    /// Either the left or right Alt keys must be pressed (1) or must not be pressed (0).
-    ///
-    UINT32  AltPressed      : 1;
-    ///
-    /// Either the left or right Logo keys must be pressed (1) or must not be pressed (0).
-    ///
-    UINT32  LogoPressed     : 1;
-    ///
-    /// The Menu key must be pressed (1) or must not be pressed (0).
-    ///
-    UINT32  MenuPressed     : 1;
-    ///
-    /// The SysReq key must be pressed (1) or must not be pressed (0).
-    ///
-    UINT32  SysReqPressed    : 1;
-    UINT32  Reserved        : 16;
-    ///
-    /// Specifies the actual number of entries in EFI_KEY_OPTION.Keys, from 0-3. If
-    /// zero, then only the shift state is considered. If more than one, then the boot option will
-    /// only be launched if all of the specified keys are pressed with the same shift state.
-    ///
-    UINT32  InputKeyCount   : 2;
-  } Options;
-  UINT32  PackedValue;
-} EFI_BOOT_KEY_DATA;
+typedef UINT32 EFI_BOOT_KEY_DATA;
+///
+/// Indicates the revision of the EFI_KEY_OPTION structure. This revision level should be 0.
+///
+#define EFI_KEY_OPTION_REVISION_MASK        0x000000FF
+///
+/// Either the left or right Shift keys must be pressed (1) or must not be pressed (0).
+///
+#define EFI_KEY_OPTION_SHIFT_PRESSED_MASK   BIT8
+///
+/// Either the left or right Control keys must be pressed (1) or must not be pressed (0).
+///
+#define EFI_KEY_OPTION_CONTROL_PRESSED_MASK BIT9
+///
+/// Either the left or right Alt keys must be pressed (1) or must not be pressed (0).
+///
+#define EFI_KEY_OPTION_ALT_PRESSED_MASK     BIT10
+///
+/// Either the left or right Logo keys must be pressed (1) or must not be pressed (0).
+///
+#define EFI_KEY_OPTION_LOGO_PRESSED_MASK    BIT11
+///
+/// The Menu key must be pressed (1) or must not be pressed (0).
+///
+#define EFI_KEY_OPTION_MENU_PRESSED_MASK    BIT12
+///
+/// The SysReq key must be pressed (1) or must not be pressed (0).
+///
+#define EFI_KEY_OPTION_SYS_REQ_PRESSED_MASK BIT13
+///
+/// Specifies the actual number of entries in EFI_KEY_OPTION.Keys, from 0-3. If
+/// zero, then only the shift state is considered. If more than one, then the boot option will
+/// only be launched if all of the specified keys are pressed with the same shift state.
+///
+#define EFI_KEY_OPTION_INPUT_KEY_COUNT_MASK (BIT30 | BIT31)
 
 ///
 /// EFI Key Option.
 ///
+#pragma pack(1)
 typedef struct {
   ///
   /// Specifies options about how the key will be processed.
@@ -2070,6 +2076,7 @@ typedef struct {
   ///
   //EFI_INPUT_KEY      Keys[];
 } EFI_KEY_OPTION;
+#pragma pack()
 
 //
 // EFI File location to boot from on removable media devices

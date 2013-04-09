@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -177,4 +178,21 @@ int read_smbios_string ( struct smbios_structure *structure,
 
 	DBG ( "SMBIOS string index %d not found\n", index );
 	return -ENOENT;
+}
+
+/**
+ * Get SMBIOS version
+ *
+ * @ret version		Version, or negative error
+ */
+int smbios_version ( void ) {
+	int rc;
+
+	/* Find SMBIOS */
+	if ( ( smbios.address == UNULL ) &&
+	     ( ( rc = find_smbios ( &smbios ) ) != 0 ) )
+		return rc;
+	assert ( smbios.address != UNULL );
+
+	return smbios.version;
 }

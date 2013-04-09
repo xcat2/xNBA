@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -89,9 +90,6 @@ static uint8_t dhcp_request_options_data[] = {
 		      DHCP_EB_ENCAP, DHCP_ISCSI_INITIATOR_IQN ),
 	DHCP_END
 };
-
-/** Version number feature */
-FEATURE_VERSION ( VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH );
 
 /** DHCP server address setting */
 struct setting dhcp_server_setting __setting ( SETTING_MISC ) = {
@@ -937,9 +935,24 @@ int dhcp_create_packet ( struct dhcp_packet *dhcppkt,
 	dhcphdr->magic = htonl ( DHCP_MAGIC_COOKIE );
 	dhcphdr->htype = ntohs ( netdev->ll_protocol->ll_proto );
 	dhcphdr->op = dhcp_op[msgtype];
-	dhcphdr->hlen = dhcp_chaddr ( netdev, dhcphdr->chaddr,
-				      &dhcphdr->flags );
+	dhcphdr->hlen = netdev->ll_protocol->ll_addr_len;
+	memcpy ( dhcphdr->chaddr, netdev->ll_addr,
+		 netdev->ll_protocol->ll_addr_len );
 	memcpy ( dhcphdr->options, options, options_len );
+
+	/* If the local link-layer address functions only as a name
+	 * (i.e. cannot be used as a destination address), then
+	 * request broadcast responses.
+	 */
+	if ( netdev->ll_protocol->flags & LL_NAME_ONLY )
+		dhcphdr->flags |= htons ( BOOTP_FL_BROADCAST );
+
+	/* If the network device already has an IPv4 address then
+	 * unicast responses from the DHCP server may be rejected, so
+	 * request broadcast responses.
+	 */
+	if ( ipv4_has_any_addr ( netdev ) )
+		dhcphdr->flags |= htons ( BOOTP_FL_BROADCAST );
 
 	/* Initialise DHCP packet structure */
 	memset ( dhcppkt, 0, sizeof ( *dhcppkt ) );
@@ -1028,10 +1041,15 @@ int dhcp_create_request ( struct dhcp_packet *dhcppkt,
 		return rc;
 	}
 
-	/* Add client UUID, if we have one.  Required for PXE. */
+	/* Add client UUID, if we have one.  Required for PXE.  The
+	 * PXE spec does not specify a byte ordering for UUIDs, but
+	 * RFC4578 suggests that it follows the EFI spec, in which the
+	 * first three fields are little-endian.
+	 */
 	client_uuid.type = DHCP_CLIENT_UUID_TYPE;
 	if ( ( len = fetch_uuid_setting ( NULL, &uuid_setting,
 					  &client_uuid.uuid ) ) >= 0 ) {
+		uuid_mangle ( &client_uuid.uuid );
 		if ( ( rc = dhcppkt_store ( dhcppkt, DHCP_CLIENT_UUID,
 					    &client_uuid,
 					    sizeof ( client_uuid ) ) ) != 0 ) {

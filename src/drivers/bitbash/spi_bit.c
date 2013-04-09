@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -162,6 +163,9 @@ static int spi_bit_rw ( struct spi_bus *bus, struct spi_device *device,
 	uint32_t tmp_address;
 	uint32_t tmp_address_detect;
 
+	/* Open bit-bashing interface */
+	open_bit ( &spibit->basher );
+
 	/* Deassert chip select to reset specified slave */
 	spi_bit_set_slave_select ( spibit, device->slave, DESELECT_SLAVE );
 
@@ -212,6 +216,9 @@ static int spi_bit_rw ( struct spi_bus *bus, struct spi_device *device,
 
 	/* Deassert chip select on specified slave */
 	spi_bit_set_slave_select ( spibit, device->slave, DESELECT_SLAVE );
+
+	/* Close bit-bashing interface */
+	close_bit ( &spibit->basher );
 
 	return 0;
 }

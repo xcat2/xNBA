@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -99,8 +100,8 @@ static struct setting cert_setting __setting ( SETTING_CRYPTO ) = {
 };
 
 /** Client private key setting */
-static struct setting key_setting __setting ( SETTING_CRYPTO ) = {
-	.name = "key",
+static struct setting privkey_setting __setting ( SETTING_CRYPTO ) = {
+	.name = "privkey",
 	.description = "Client private key",
 	.tag = DHCP_EB_KEY,
 	.type = &setting_type_hex,
@@ -146,7 +147,7 @@ static int clientcert_apply_settings ( void ) {
 
 		/* Fetch new client private key, if any */
 		free ( key );
-		len = fetch_setting_copy ( NULL, &key_setting, &key );
+		len = fetch_setting_copy ( NULL, &privkey_setting, &key );
 		if ( len < 0 ) {
 			rc = len;
 			DBGC ( &client_certificate, "CLIENTCERT cannot fetch "

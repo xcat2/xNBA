@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -34,6 +35,9 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/features.h>
 
 FEATURE ( FEATURE_IMAGE, "PXE", DHCP_EB_FEATURE_PXE, 1 );
+
+/** PXE command line */
+const char *pxe_cmdline;
 
 /**
  * Execute PXE image
@@ -62,15 +66,28 @@ static int pxe_exec ( struct image *image ) {
 		       image );
 		return -ENODEV;
 	}
+	netdev_get ( netdev );
 
 	/* Activate PXE */
 	pxe_activate ( netdev );
 
+	/* Set PXE command line */
+	pxe_cmdline = image->cmdline;
+
 	/* Start PXE NBP */
 	rc = pxe_start_nbp();
 
+	/* Clear PXE command line */
+	pxe_cmdline = NULL;
+
 	/* Deactivate PXE */
 	pxe_deactivate();
+
+	/* Try to reopen network device.  Ignore errors, since the NBP
+	 * may have called PXENV_STOP_UNDI.
+	 */
+	netdev_open ( netdev );
+	netdev_put ( netdev );
 
 	return rc;
 }

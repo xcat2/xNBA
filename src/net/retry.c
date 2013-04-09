@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -176,11 +177,10 @@ static void timer_expired ( struct retry_timer *timer ) {
 }
 
 /**
- * Single-step the retry timer list
+ * Poll the retry timer list
  *
- * @v process		Retry timer process
  */
-static void retry_step ( struct process *process __unused ) {
+void retry_poll ( void ) {
 	struct retry_timer *timer;
 	unsigned long now = currticks();
 	unsigned long used;
@@ -197,6 +197,15 @@ static void retry_step ( struct process *process __unused ) {
 			break;
 		}
 	}
+}
+
+/**
+ * Single-step the retry timer list
+ *
+ * @v process		Retry timer process
+ */
+static void retry_step ( struct process *process __unused ) {
+	retry_poll();
 }
 
 /** Retry timer process */

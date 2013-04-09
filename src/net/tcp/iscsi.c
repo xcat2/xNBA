@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -337,7 +338,8 @@ static void iscsi_scsi_done ( struct iscsi_session *iscsi, int rc,
 	iscsi->command = NULL;
 
 	/* Send SCSI response, if any */
-	scsi_response ( &iscsi->data, rsp );
+	if ( rsp )
+		scsi_response ( &iscsi->data, rsp );
 
 	/* Close SCSI command, if this is still the same command.  (It
 	 * is possible that the command interface has already been

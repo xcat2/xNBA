@@ -12,7 +12,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -189,6 +190,8 @@ static void hide_etherboot ( void ) {
  * possible.
  */
 static void unhide_etherboot ( int flags __unused ) {
+	struct memory_map memmap;
+	int rc;
 
 	/* If we have more than one hooked interrupt at this point, it
 	 * means that some other vector is still hooked, in which case
@@ -202,15 +205,23 @@ static void unhide_etherboot ( int flags __unused ) {
 		return;
 	}
 
-	/* Try to unhook INT 15.  If it fails, then just leave it
-	 * hooked; it takes care of protecting itself.  :)
-	 */
-	unhook_bios_interrupt ( 0x15, ( unsigned int ) int15,
-				&int15_vector );
+	/* Try to unhook INT 15 */
+	if ( ( rc = unhook_bios_interrupt ( 0x15, ( unsigned int ) int15,
+					    &int15_vector ) ) != 0 ) {
+		DBG ( "Cannot unhook INT15: %s\n", strerror ( rc ) );
+		/* Leave it hooked; there's nothing else we can do,
+		 * and it should be intrinsically safe (though
+		 * wasteful of RAM).
+		 */
+	}
 
 	/* Unhook fake E820 map, if used */
 	if ( FAKE_E820 )
 		unfake_e820();
+
+	/* Dump memory map after unhiding */
+	DBG ( "Unhidden iPXE from system memory map\n" );
+	get_memmap ( &memmap );
 }
 
 /** Hide Etherboot startup function */

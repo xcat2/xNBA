@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  */
 
@@ -406,7 +407,7 @@ pcnet32_chip_detect ( struct pcnet32_private *priv )
 	/*
 	 * On selected chips turn on the BCR18:NOUFLO bit. This stops transmit
 	 * starting until the packet is loaded. Strike one for reliability, lose
-	 * one for latency - although on PCI this isnt a big loss. Older chips
+	 * one for latency - although on PCI this isn't a big loss. Older chips
 	 * have FIFO's smaller than a packet, so you can't do this.
 	 * Turn on BCR18:BurstRdEn and BCR18:BurstWrEn.
 	 */

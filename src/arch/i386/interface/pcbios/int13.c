@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -37,6 +38,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/sanboot.h>
 #include <ipxe/device.h>
 #include <ipxe/pci.h>
+#include <ipxe/iso9660.h>
+#include <ipxe/eltorito.h>
 #include <realmode.h>
 #include <bios.h>
 #include <biosint.h>
@@ -626,7 +629,7 @@ static const struct int13_fdd_geometry int13_fdd_geometries[] = {
 static int int13_guess_geometry_fdd ( struct int13_drive *int13,
 				      unsigned int *heads,
 				      unsigned int *sectors ) {
-	unsigned int blocks = int13_blksize ( int13 );
+	unsigned int blocks = int13_capacity ( int13 );
 	const struct int13_fdd_geometry *geometry;
 	unsigned int cylinders;
 	unsigned int i;

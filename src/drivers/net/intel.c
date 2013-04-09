@@ -363,6 +363,7 @@ static void intel_check_link ( struct net_device *netdev ) {
 static int intel_create_ring ( struct intel_nic *intel,
 			       struct intel_ring *ring ) {
 	physaddr_t address;
+	uint32_t dctl;
 
 	/* Allocate descriptor ring.  Align ring on its own size to
 	 * prevent any possible page-crossing errors due to hardware
@@ -392,6 +393,11 @@ static int intel_create_ring ( struct intel_nic *intel,
 	/* Reset head and tail pointers */
 	writel ( 0, ( intel->regs + ring->reg + INTEL_xDH ) );
 	writel ( 0, ( intel->regs + ring->reg + INTEL_xDT ) );
+
+	/* Enable ring */
+	dctl = readl ( intel->regs + ring->reg + INTEL_xDCTL );
+	dctl |= INTEL_xDCTL_ENABLE;
+	writel ( dctl, intel->regs + ring->reg + INTEL_xDCTL );
 
 	DBGC ( intel, "INTEL %p ring %05x is at [%08llx,%08llx)\n",
 	       intel, ring->reg, ( ( unsigned long long ) address ),
@@ -491,9 +497,6 @@ static int intel_open ( struct net_device *netdev ) {
 	if ( ( rc = intel_create_ring ( intel, &intel->rx ) ) != 0 )
 		goto err_create_rx;
 
-	/* Fill receive ring */
-	intel_refill_rx ( intel );
-
 	/* Program MAC address */
 	memset ( &mac, 0, sizeof ( mac ) );
 	memcpy ( mac.raw, netdev->ll_addr, sizeof ( mac.raw ) );
@@ -514,6 +517,9 @@ static int intel_open ( struct net_device *netdev ) {
 	rctl |= ( INTEL_RCTL_EN | INTEL_RCTL_UPE | INTEL_RCTL_MPE |
 		  INTEL_RCTL_BAM | INTEL_RCTL_BSIZE_2048 | INTEL_RCTL_SECRC );
 	writel ( rctl, intel->regs + INTEL_RCTL );
+
+	/* Fill receive ring */
+	intel_refill_rx ( intel );
 
 	/* Update link state */
 	intel_check_link ( netdev );
@@ -693,9 +699,13 @@ static void intel_poll ( struct net_device *netdev ) {
 	if ( icr & INTEL_IRQ_TXDW )
 		intel_poll_tx ( netdev );
 
-	/* Poll for RX completionsm, if applicable */
-	if ( icr & INTEL_IRQ_RXT0 )
+	/* Poll for RX completions, if applicable */
+	if ( icr & ( INTEL_IRQ_RXT0 | INTEL_IRQ_RXO ) )
 		intel_poll_rx ( netdev );
+
+	/* Report receive overruns */
+	if ( icr & INTEL_IRQ_RXO )
+		netdev_rx_err ( netdev, NULL, -ENOBUFS );
 
 	/* Check link state, if applicable */
 	if ( icr & INTEL_IRQ_LSC )
@@ -793,6 +803,7 @@ static int intel_probe ( struct pci_device *pci ) {
  err_fetch_mac:
 	intel_reset ( intel );
  err_reset:
+	iounmap ( intel->regs );
 	netdev_nullify ( netdev );
 	netdev_put ( netdev );
  err_alloc:
@@ -815,6 +826,7 @@ static void intel_remove ( struct pci_device *pci ) {
 	intel_reset ( intel );
 
 	/* Free network device */
+	iounmap ( intel->regs );
 	netdev_nullify ( netdev );
 	netdev_put ( netdev );
 }
@@ -933,6 +945,7 @@ static struct pci_device_id intel_nics[] = {
 	PCI_ROM ( 0x8086, 0x1525, "82567v-4", "82567V-4", 0 ),
 	PCI_ROM ( 0x8086, 0x1526, "82576-5", "82576", 0 ),
 	PCI_ROM ( 0x8086, 0x1527, "82580-f2", "82580 Fiber", 0 ),
+	PCI_ROM ( 0x8086, 0x1533, "i210", "I210", 0 ),
 	PCI_ROM ( 0x8086, 0x294c, "82566dc-2", "82566DC-2", 0 ),
 	PCI_ROM ( 0x8086, 0x2e6e, "cemedia", "CE Media Processor", 0 ),
 };

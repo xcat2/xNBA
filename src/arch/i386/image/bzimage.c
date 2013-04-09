@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -32,6 +33,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <assert.h>
 #include <realmode.h>
 #include <bzimage.h>
+#include <initrd.h>
 #include <ipxe/uaccess.h>
 #include <ipxe/image.h>
 #include <ipxe/segment.h>
@@ -214,7 +216,8 @@ static void bzimage_update_header ( struct image *image,
 	} else {
 		bzimg->cmdline_magic.magic = BZI_CMDLINE_MAGIC;
 		bzimg->cmdline_magic.offset = bzimg->rm_cmdline;
-		bzimg->bzhdr.setup_move_size = bzimg->rm_memsz;
+		if ( bzimg->version >= 0x0200 )
+			bzimg->bzhdr.setup_move_size = bzimg->rm_memsz;
 	}
 
 	/* Set video mode */
@@ -302,11 +305,10 @@ static int bzimage_parse_cmdline ( struct image *image,
  * @v image		bzImage image
  * @v bzimg		bzImage context
  * @v cmdline		Kernel command line
- * @ret rc		Return status code
  */
-static int bzimage_set_cmdline ( struct image *image,
-				 struct bzimage_context *bzimg,
-				 const char *cmdline ) {
+static void bzimage_set_cmdline ( struct image *image,
+				  struct bzimage_context *bzimg,
+				  const char *cmdline ) {
 	size_t cmdline_len;
 
 	/* Copy command line down to real-mode portion */
@@ -316,8 +318,32 @@ static int bzimage_set_cmdline ( struct image *image,
 	copy_to_user ( bzimg->rm_kernel, bzimg->rm_cmdline,
 		       cmdline, cmdline_len );
 	DBGC ( image, "bzImage %p command line \"%s\"\n", image, cmdline );
+}
 
-	return 0;
+/**
+ * Parse standalone image command line for cpio parameters
+ *
+ * @v image		bzImage file
+ * @v cpio		CPIO header
+ * @v cmdline		Command line
+ */
+static void bzimage_parse_cpio_cmdline ( struct image *image,
+					 struct cpio_header *cpio,
+					 const char *cmdline ) {
+	char *arg;
+	char *end;
+	unsigned int mode;
+
+	/* Look for "mode=" */
+	if ( ( arg = strstr ( cmdline, "mode=" ) ) ) {
+		arg += 5;
+		mode = strtoul ( arg, &end, 8 /* Octal for file mode */ );
+		if ( *end && ( *end != ' ' ) ) {
+			DBGC ( image, "bzImage %p strange \"mode=\""
+			       "terminator '%c'\n", image, *end );
+		}
+		cpio_set_field ( cpio->c_mode, ( 0100000 | mode ) );
+	}
 }
 
 /**
@@ -326,14 +352,17 @@ static int bzimage_set_cmdline ( struct image *image,
  * @v image		bzImage image
  * @v initrd		initrd image
  * @v address		Address at which to load, or UNULL
- * @ret len		Length of loaded image, rounded up to 4 bytes
+ * @ret len		Length of loaded image, rounded up to INITRD_ALIGN
  */
 static size_t bzimage_load_initrd ( struct image *image,
 				    struct image *initrd,
 				    userptr_t address ) {
 	char *filename = initrd->cmdline;
+	char *cmdline;
 	struct cpio_header cpio;
         size_t offset = 0;
+	size_t name_len;
+	size_t pad_len;
 
 	/* Do not include kernel image itself as an initrd */
 	if ( initrd == image )
@@ -341,24 +370,28 @@ static size_t bzimage_load_initrd ( struct image *image,
 
 	/* Create cpio header before non-prebuilt images */
 	if ( filename && filename[0] ) {
-		size_t name_len = ( strlen ( filename ) + 1 );
-
-		DBGC ( image, "bzImage %p inserting initrd %p as %s\n",
-		       image, initrd, filename );
+		cmdline = strchr ( filename, ' ' );
+		name_len = ( ( cmdline ? ( ( size_t ) ( cmdline - filename ) )
+			       : strlen ( filename ) ) + 1 /* NUL */ );
 		memset ( &cpio, '0', sizeof ( cpio ) );
 		memcpy ( cpio.c_magic, CPIO_MAGIC, sizeof ( cpio.c_magic ) );
 		cpio_set_field ( cpio.c_mode, 0100644 );
 		cpio_set_field ( cpio.c_nlink, 1 );
 		cpio_set_field ( cpio.c_filesize, initrd->len );
 		cpio_set_field ( cpio.c_namesize, name_len );
+		if ( cmdline ) {
+			bzimage_parse_cpio_cmdline ( image, &cpio,
+						     ( cmdline + 1 /* ' ' */ ));
+		}
 		if ( address ) {
 			copy_to_user ( address, offset, &cpio,
 				       sizeof ( cpio ) );
 		}
 		offset += sizeof ( cpio );
 		if ( address ) {
+			memset_user ( address, offset, 0, name_len );
 			copy_to_user ( address, offset, filename,
-				       name_len );
+				       ( name_len - 1 /* NUL (or space) */ ) );
 		}
 		offset += name_len;
 		offset = ( ( offset + 0x03 ) & ~0x03 );
@@ -366,17 +399,82 @@ static size_t bzimage_load_initrd ( struct image *image,
 
 	/* Copy in initrd image body */
 	if ( address )
-		memcpy_user ( address, offset, initrd->data, 0, initrd->len );
-	offset += initrd->len;
+		memmove_user ( address, offset, initrd->data, 0, initrd->len );
 	if ( address ) {
-		DBGC ( image, "bzImage %p has initrd %p at [%lx,%lx)\n",
-		       image, initrd, user_to_phys ( address, 0 ),
-		       user_to_phys ( address, offset ) );
+		DBGC ( image, "bzImage %p initrd %p [%#08lx,%#08lx,%#08lx)"
+		       "%s%s\n", image, initrd, user_to_phys ( address, 0 ),
+		       user_to_phys ( address, offset ),
+		       user_to_phys ( address, ( offset + initrd->len ) ),
+		       ( filename ? " " : "" ), ( filename ? filename : "" ) );
+		DBGC2_MD5A ( image, user_to_phys ( address, offset ),
+			     user_to_virt ( address, offset ), initrd->len );
+	}
+	offset += initrd->len;
+
+	/* Round up to multiple of INITRD_ALIGN and zero-pad */
+	pad_len = ( ( -offset ) & ( INITRD_ALIGN - 1 ) );
+	if ( address )
+		memset_user ( address, offset, 0, pad_len );
+	offset += pad_len;
+
+	return offset;
+}
+
+/**
+ * Check that initrds can be loaded
+ *
+ * @v image		bzImage image
+ * @v bzimg		bzImage context
+ * @ret rc		Return status code
+ */
+static int bzimage_check_initrds ( struct image *image,
+				   struct bzimage_context *bzimg ) {
+	struct image *initrd;
+	userptr_t bottom;
+	size_t len = 0;
+	int rc;
+
+	/* Calculate total loaded length of initrds */
+	for_each_image ( initrd ) {
+
+		/* Skip kernel */
+		if ( initrd == image )
+			continue;
+
+		/* Calculate length */
+		len += bzimage_load_initrd ( image, initrd, UNULL );
+
+		DBGC ( image, "bzImage %p initrd %p from [%#08lx,%#08lx)%s%s\n",
+		       image, initrd, user_to_phys ( initrd->data, 0 ),
+		       user_to_phys ( initrd->data, initrd->len ),
+		       ( initrd->cmdline ? " " : "" ),
+		       ( initrd->cmdline ? initrd->cmdline : "" ) );
+		DBGC2_MD5A ( image, user_to_phys ( initrd->data, 0 ),
+			     user_to_virt ( initrd->data, 0 ), initrd->len );
 	}
 
-	/* Round up to 4-byte boundary */
-	offset = ( ( offset + 0x03 ) & ~0x03 );
-	return offset;
+	/* Calculate lowest usable address */
+	bottom = userptr_add ( bzimg->pm_kernel, bzimg->pm_sz );
+
+	/* Check that total length fits within space available for
+	 * reshuffling.  This is a conservative check, since CPIO
+	 * headers are not present during reshuffling, but this
+	 * doesn't hurt and keeps the code simple.
+	 */
+	if ( ( rc = initrd_reshuffle_check ( len, bottom ) ) != 0 ) {
+		DBGC ( image, "bzImage %p failed reshuffle check: %s\n",
+		       image, strerror ( rc ) );
+		return rc;
+	}
+
+	/* Check that total length fits within kernel's memory limit */
+	if ( user_to_phys ( bottom, len ) > bzimg->mem_limit ) {
+		DBGC ( image, "bzImage %p not enough space for initrds\n",
+		       image );
+		return -ENOBUFS;
+	}
+
+	return 0;
 }
 
 /**
@@ -384,62 +482,63 @@ static size_t bzimage_load_initrd ( struct image *image,
  *
  * @v image		bzImage image
  * @v bzimg		bzImage context
- * @ret rc		Return status code
  */
-static int bzimage_load_initrds ( struct image *image,
-				  struct bzimage_context *bzimg ) {
+static void bzimage_load_initrds ( struct image *image,
+				   struct bzimage_context *bzimg ) {
 	struct image *initrd;
-	size_t total_len = 0;
-	physaddr_t address;
-	int rc;
+	struct image *highest = NULL;
+	struct image *other;
+	userptr_t top;
+	userptr_t dest;
+	size_t len;
 
-	/* Add up length of all initrd images */
-	for_each_image ( initrd )
-		total_len += bzimage_load_initrd ( image, initrd, UNULL );
+	/* Reshuffle initrds into desired order */
+	initrd_reshuffle ( userptr_add ( bzimg->pm_kernel, bzimg->pm_sz ) );
 
-	/* Give up if no initrd images found */
-	if ( ! total_len )
-		return 0;
-
-	/* Find a suitable start address.  Try 1MB boundaries,
-	 * starting from the downloaded kernel image itself and
-	 * working downwards until we hit an available region.
-	 */
-	for ( address = ( user_to_phys ( image->data, 0 ) & ~0xfffff ) ; ;
-	      address -= 0x100000 ) {
-		/* Check that we're not going to overwrite the
-		 * kernel itself.  This check isn't totally
-		 * accurate, but errs on the side of caution.
-		 */
-		if ( address <= ( BZI_LOAD_HIGH_ADDR + image->len ) ) {
-			DBGC ( image, "bzImage %p could not find a location "
-			       "for initrd\n", image );
-			return -ENOBUFS;
-		}
-		/* Check that we are within the kernel's range */
-		if ( ( address + total_len - 1 ) > bzimg->mem_limit )
-			continue;
-		/* Prepare and verify segment */
-		if ( ( rc = prep_segment ( phys_to_user ( address ), 0,
-					   total_len ) ) != 0 )
-			continue;
-		/* Use this address */
-		break;
-	}
-
-	/* Record initrd location */
-	bzimg->ramdisk_image = address;
-	bzimg->ramdisk_size = total_len;
-
-	/* Construct initrd */
-	DBGC ( image, "bzImage %p constructing initrd at [%lx,%lx)\n",
-	       image, address, ( address + total_len ) );
+	/* Find highest initrd */
 	for_each_image ( initrd ) {
-		address += bzimage_load_initrd ( image, initrd,
-						 phys_to_user ( address ) );
+		if ( ( highest == NULL ) ||
+		     ( userptr_sub ( initrd->data, highest->data ) > 0 ) ) {
+			highest = initrd;
+		}
 	}
 
-	return 0;
+	/* Do nothing if there are no initrds */
+	if ( ! highest )
+		return;
+
+	/* Find highest usable address */
+	top = userptr_add ( highest->data,
+			    ( ( highest->len + INITRD_ALIGN - 1 ) &
+			      ~( INITRD_ALIGN - 1 ) ) );
+	if ( user_to_phys ( top, 0 ) > bzimg->mem_limit )
+		top = phys_to_user ( bzimg->mem_limit );
+	DBGC ( image, "bzImage %p loading initrds from %#08lx downwards\n",
+	       image, user_to_phys ( top, 0 ) );
+
+	/* Load initrds in order */
+	for_each_image ( initrd ) {
+
+		/* Calculate cumulative length of following
+		 * initrds (including padding).
+		 */
+		len = 0;
+		for_each_image ( other ) {
+			if ( other == initrd )
+				len = 0;
+			len += bzimage_load_initrd ( image, other, UNULL );
+		}
+
+		/* Load initrd at this address */
+		dest = userptr_add ( top, -len );
+		bzimage_load_initrd ( image, initrd, dest );
+
+		/* Record initrd location */
+		if ( ! bzimg->ramdisk_image ) {
+			bzimg->ramdisk_image = user_to_phys ( dest, 0 );
+			bzimg->ramdisk_size = len;
+		}
+	}
 }
 
 /**
@@ -472,32 +571,36 @@ static int bzimage_exec ( struct image *image ) {
 		return rc;
 	}
 
+	/* Parse command line for bootloader parameters */
+	if ( ( rc = bzimage_parse_cmdline ( image, &bzimg, cmdline ) ) != 0)
+		return rc;
+
+	/* Check that initrds can be loaded */
+	if ( ( rc = bzimage_check_initrds ( image, &bzimg ) ) != 0 )
+		return rc;
+
+	/* Remove kernel from image list (without invalidating image pointer) */
+	unregister_image ( image_get ( image ) );
+
 	/* Load segments */
 	memcpy_user ( bzimg.rm_kernel, 0, image->data,
 		      0, bzimg.rm_filesz );
 	memcpy_user ( bzimg.pm_kernel, 0, image->data,
 		      bzimg.rm_filesz, bzimg.pm_sz );
 
-	/* Update and write out header */
-	bzimage_update_header ( image, &bzimg, bzimg.rm_kernel );
-
-	/* Parse command line for bootloader parameters */
-	if ( ( rc = bzimage_parse_cmdline ( image, &bzimg, cmdline ) ) != 0)
-		return rc;
-
 	/* Store command line */
-	if ( ( rc = bzimage_set_cmdline ( image, &bzimg, cmdline ) ) != 0 )
-		return rc;
+	bzimage_set_cmdline ( image, &bzimg, cmdline );
+
+	/* Prepare for exiting.  Must do this before loading initrds,
+	 * since loading the initrds will corrupt the external heap.
+	 */
+	shutdown_boot();
 
 	/* Load any initrds */
-	if ( ( rc = bzimage_load_initrds ( image, &bzimg ) ) != 0 )
-		return rc;
+	bzimage_load_initrds ( image, &bzimg );
 
 	/* Update kernel header */
 	bzimage_update_header ( image, &bzimg, bzimg.rm_kernel );
-
-	/* Prepare for exiting */
-	shutdown_boot();
 
 	DBGC ( image, "bzImage %p jumping to RM kernel at %04x:0000 "
 	       "(stack %04x:%04zx)\n", image, ( bzimg.rm_kernel_seg + 0x20 ),

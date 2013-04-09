@@ -15,7 +15,8 @@
 *
 *    You should have received a copy of the GNU General Public License
 *    along with this program; if not, write to the Free Software
-*    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+*    02110-1301, USA.
 *
 *    This driver is based on:
 *         via-velocity.c: VIA Velocity VT6120, VT6122 Ethernet driver 
@@ -124,7 +125,7 @@ VELOCITY_PARAM(enable_tagging, "Enable 802.1Q tagging");
 /* IP_byte_align[] is used for IP header DWORD byte aligned
    0: indicate the IP header won't be DWORD byte aligned.(Default) .
    1: indicate the IP header will be DWORD byte aligned.
-      In some enviroment, the IP header should be DWORD byte aligned,
+      In some environment, the IP header should be DWORD byte aligned,
       or the packet will be droped when we receive it. (eg: IPVS)
 */
 VELOCITY_PARAM(IP_byte_align, "Enable IP header dword aligned");

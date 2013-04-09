@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -69,6 +70,9 @@ struct undi_nic {
 
 /** Delay between retries of PXENV_UNDI_INITIALIZE */
 #define UNDI_INITIALIZE_RETRY_DELAY_MS 200
+
+/** Alignment of received frame payload */
+#define UNDI_RX_ALIGN 16
 
 static void undinet_close ( struct net_device *netdev );
 
@@ -299,6 +303,7 @@ static void undinet_poll ( struct net_device *netdev ) {
 	struct s_PXENV_UNDI_ISR undi_isr;
 	struct io_buffer *iobuf = NULL;
 	size_t len;
+	size_t reserve_len;
 	size_t frag_len;
 	size_t max_frag_len;
 	int rc;
@@ -340,6 +345,8 @@ static void undinet_poll ( struct net_device *netdev ) {
 			/* Packet fragment received */
 			len = undi_isr.FrameLength;
 			frag_len = undi_isr.BufferLength;
+			reserve_len = ( -undi_isr.FrameHeaderLength &
+					( UNDI_RX_ALIGN - 1 ) );
 			if ( ( len == 0 ) || ( len < frag_len ) ) {
 				/* Don't laugh.  VMWare does it. */
 				DBGC ( undinic, "UNDINIC %p reported insane "
@@ -348,15 +355,17 @@ static void undinet_poll ( struct net_device *netdev ) {
 				netdev_rx_err ( netdev, NULL, -EINVAL );
 				break;
 			}
-			if ( ! iobuf )
-				iobuf = alloc_iob ( len );
 			if ( ! iobuf ) {
-				DBGC ( undinic, "UNDINIC %p could not "
-				       "allocate %zd bytes for RX buffer\n",
-				       undinic, len );
-				/* Fragment will be dropped */
-				netdev_rx_err ( netdev, NULL, -ENOMEM );
-				goto done;
+				iobuf = alloc_iob ( reserve_len + len );
+				if ( ! iobuf ) {
+					DBGC ( undinic, "UNDINIC %p could not "
+					       "allocate %zd bytes for RX "
+					       "buffer\n", undinic, len );
+					/* Fragment will be dropped */
+					netdev_rx_err ( netdev, NULL, -ENOMEM );
+					goto done;
+				}
+				iob_reserve ( iobuf, reserve_len );
 			}
 			max_frag_len = iob_tailroom ( iobuf );
 			if ( frag_len > max_frag_len ) {
@@ -516,6 +525,53 @@ static struct net_device_operations undinet_operations = {
 	.irq   		= undinet_irq,
 };
 
+/** A device with broken support for generating interrupts */
+struct undinet_irq_broken {
+	/** PCI vendor ID */
+	uint16_t pci_vendor;
+	/** PCI device ID */
+	uint16_t pci_device;
+};
+
+/**
+ * List of devices with broken support for generating interrupts
+ *
+ * Some PXE stacks are known to claim that IRQs are supported, but
+ * then never generate interrupts.  No satisfactory solution has been
+ * found to this problem; the workaround is to add the PCI vendor and
+ * device IDs to this list.  This is something of a hack, since it
+ * will generate false positives for identical devices with a working
+ * PXE stack (e.g. those that have been reflashed with iPXE), but it's
+ * an improvement on the current situation.
+ */
+static const struct undinet_irq_broken undinet_irq_broken_list[] = {
+	/* HP XX70x laptops */
+	{ .pci_vendor = 0x8086, .pci_device = 0x1502 },
+	{ .pci_vendor = 0x8086, .pci_device = 0x1503 },
+};
+
+/**
+ * Check for devices with broken support for generating interrupts
+ *
+ * @v undi		UNDI device
+ * @ret irq_is_broken	Interrupt support is broken; no interrupts are generated
+ */
+static int undinet_irq_is_broken ( struct undi_device *undi ) {
+	const struct undinet_irq_broken *broken;
+	unsigned int i;
+
+	for ( i = 0 ; i < ( sizeof ( undinet_irq_broken_list ) /
+			    sizeof ( undinet_irq_broken_list[0] ) ) ; i++ ) {
+		broken = &undinet_irq_broken_list[i];
+		if ( ( undi->dev.desc.bus_type == BUS_TYPE_PCI ) &&
+		     ( undi->dev.desc.vendor == broken->pci_vendor ) &&
+		     ( undi->dev.desc.device == broken->pci_device ) ) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /**
  * Probe UNDI device
  *
@@ -631,6 +687,11 @@ int undinet_probe ( struct undi_device *undi ) {
 		DBGC ( undinic, "UNDINIC %p Etherboot 5.4 workaround enabled\n",
 		       undinic );
 		undinic->hacks |= UNDI_HACK_EB54;
+	}
+	if ( undinet_irq_is_broken ( undi ) ) {
+		DBGC ( undinic, "UNDINIC %p forcing polling mode due to "
+		       "broken interrupts\n", undinic );
+		undinic->irq_supported = 0;
 	}
 
 	/* Register network device */

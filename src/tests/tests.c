@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -25,10 +26,14 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 /* Drag in all applicable self-tests */
+REQUIRE_OBJECT ( memcpy_test );
+REQUIRE_OBJECT ( string_test );
 REQUIRE_OBJECT ( list_test );
 REQUIRE_OBJECT ( byteswap_test );
+REQUIRE_OBJECT ( base64_test );
 REQUIRE_OBJECT ( settings_test );
 REQUIRE_OBJECT ( time_test );
+REQUIRE_OBJECT ( tcpip_test );
 REQUIRE_OBJECT ( crc32_test );
 REQUIRE_OBJECT ( md5_test );
 REQUIRE_OBJECT ( sha1_test );
@@ -39,4 +44,5 @@ REQUIRE_OBJECT ( hash_df_test );
 REQUIRE_OBJECT ( bigint_test );
 REQUIRE_OBJECT ( rsa_test );
 REQUIRE_OBJECT ( x509_test );
+REQUIRE_OBJECT ( ocsp_test );
 REQUIRE_OBJECT ( cms_test );

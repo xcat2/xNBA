@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -238,8 +239,6 @@ static void settings_test_exec ( void ) {
 		    RAW ( 0xf2, 0x37, 0xb2, 0x18 ), "0xf237b218" );
 
 	/* "hex" setting type */
-	storef_ok ( &test_settings, &test_hex_setting,
-		    "", RAW ( 0x00 ) );
 	storef_ok ( &test_settings, &test_hex_setting,
 		    ":", RAW ( 0x00, 0x00 ) );
 	storef_ok ( &test_settings, &test_hex_setting,

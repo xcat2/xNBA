@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -248,7 +249,8 @@ static int choose_exec ( int argc, char **argv ) {
 		goto err_show_menu;
 
 	/* Store setting */
-	if ( ( rc = storef_named_setting ( setting, item->label ) ) != 0 ) {
+	if ( ( rc = storef_named_setting ( setting, &setting_type_string,
+					   item->label ) ) != 0 ) {
 		printf ( "Could not store \"%s\": %s\n",
 			 setting, strerror ( rc ) );
 		goto err_store;

@@ -14,7 +14,8 @@
  *
  *    You should have received a copy of the GNU General Public License
  *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ *    02110-1301, USA.
  *
  * Portions of this code are taken from the Linux forcedeth driver that was
  * based on a cleanroom reimplementation which was based on reverse engineered
@@ -997,7 +998,7 @@ forcedeth_poll ( struct net_device *netdev )
 
 	DBG ( "forcedeth_poll: status = %#04x\n", status );
 
-	/* Link change interrupt occured. Call always if link is down,
+	/* Link change interrupt occurred. Call always if link is down,
 	 * to give auto-neg a chance to finish */
 	if ( ( status & NVREG_IRQ_LINK ) || ! ( netdev_link_ok ( netdev ) ) )
 		forcedeth_link_status ( netdev );

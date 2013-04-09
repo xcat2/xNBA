@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -65,15 +66,6 @@ FILE_LICENCE ( GPL2_OR_LATER );
 	__einfo_error ( EINFO_ENOTSUP_SIGNEDDATA )
 #define EINFO_ENOTSUP_SIGNEDDATA \
 	__einfo_uniqify ( EINFO_ENOTSUP, 0x01, "Not a digital signature" )
-#define ENOTSUP_DIGEST \
-	__einfo_error ( EINFO_ENOTSUP_DIGEST )
-#define EINFO_ENOTSUP_DIGEST \
-	__einfo_uniqify ( EINFO_ENOTSUP, 0x02, "Unsupported digest algorithm" )
-#define ENOTSUP_PUBKEY \
-	__einfo_error ( EINFO_ENOTSUP_PUBKEY )
-#define EINFO_ENOTSUP_PUBKEY					\
-	__einfo_uniqify ( EINFO_ENOTSUP, 0x03,			\
-			  "Unsupported public-key algorithm" )
 
 /** "pkcs7-signedData" object identifier */
 static uint8_t oid_signeddata[] = { ASN1_OID_SIGNEDDATA };
@@ -257,21 +249,14 @@ static int cms_parse_digest_algorithm ( struct cms_signature *sig,
 					struct cms_signer_info *info,
 					const struct asn1_cursor *raw ) {
 	struct asn1_algorithm *algorithm;
+	int rc;
 
 	/* Identify algorithm */
-	algorithm = asn1_algorithm ( raw );
-	if ( ! algorithm ) {
-		DBGC ( sig, "CMS %p/%p could not identify digest algorithm:\n",
-		       sig, info );
+	if ( ( rc = asn1_digest_algorithm ( raw, &algorithm ) ) != 0 ) {
+		DBGC ( sig, "CMS %p/%p could not identify digest algorithm: "
+		       "%s\n", sig, info, strerror ( rc ) );
 		DBGC_HDA ( sig, 0, raw->data, raw->len );
-		return -ENOTSUP_DIGEST;
-	}
-
-	/* Check algorithm is a digest algorithm */
-	if ( ! algorithm->digest ) {
-		DBGC ( sig, "CMS %p/%p algorithm %s is not a digest "
-		       "algorithm\n", sig, info, algorithm->name );
-		return -EINVAL_DIGEST;
+		return rc;
 	}
 
 	/* Record digest algorithm */
@@ -294,21 +279,14 @@ static int cms_parse_signature_algorithm ( struct cms_signature *sig,
 					   struct cms_signer_info *info,
 					   const struct asn1_cursor *raw ) {
 	struct asn1_algorithm *algorithm;
+	int rc;
 
 	/* Identify algorithm */
-	algorithm = asn1_algorithm ( raw );
-	if ( ! algorithm ) {
+	if ( ( rc = asn1_pubkey_algorithm ( raw, &algorithm ) ) != 0 ) {
 		DBGC ( sig, "CMS %p/%p could not identify public-key "
-		       "algorithm:\n", sig, info );
+		       "algorithm: %s\n", sig, info, strerror ( rc ) );
 		DBGC_HDA ( sig, 0, raw->data, raw->len );
-		return -ENOTSUP_PUBKEY;
-	}
-
-	/* Check algorithm is a signature algorithm */
-	if ( ! algorithm->pubkey ) {
-		DBGC ( sig, "CMS %p/%p algorithm %s is not a public-key "
-		       "algorithm\n", sig, info, algorithm->name );
-		return -EINVAL_PUBKEY;
+		return rc;
 	}
 
 	/* Record signature algorithm */

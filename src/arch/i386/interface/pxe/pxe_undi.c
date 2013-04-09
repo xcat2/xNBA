@@ -19,7 +19,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -357,7 +358,8 @@ pxenv_undi_transmit ( struct s_PXENV_UNDI_TRANSMIT *undi_transmit ) {
 	}
 
 	/* Allocate and fill I/O buffer */
-	iobuf = alloc_iob ( MAX_LL_HEADER_LEN + len );
+	iobuf = alloc_iob ( MAX_LL_HEADER_LEN +
+			    ( ( len > IOB_ZLEN ) ? len : IOB_ZLEN ) );
 	if ( ! iobuf ) {
 		DBGC2 ( &pxe_netdev, " could not allocate iobuf\n" );
 		undi_transmit->Status = PXENV_STATUS_OUT_OF_RESOURCES;

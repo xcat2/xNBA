@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -111,13 +112,15 @@ static int ib_mi_handle ( struct ib_device *ibdev,
  *
  * @v ibdev		Infiniband device
  * @v qp		Queue pair
- * @v av		Address vector
+ * @v dest		Destination address vector
+ * @v source		Source address vector
  * @v iobuf		I/O buffer
  * @v rc		Completion status code
  */
 static void ib_mi_complete_recv ( struct ib_device *ibdev,
 				  struct ib_queue_pair *qp,
-				  struct ib_address_vector *av,
+				  struct ib_address_vector *dest __unused,
+				  struct ib_address_vector *source,
 				  struct io_buffer *iobuf, int rc ) {
 	struct ib_mad_interface *mi = ib_qp_get_ownerdata ( qp );
 	union ib_mad *mad;
@@ -151,7 +154,7 @@ static void ib_mi_complete_recv ( struct ib_device *ibdev,
 	DBGC2_HDA ( mi, 0, mad, sizeof ( *mad ) );
 
 	/* Handle MAD */
-	if ( ( rc = ib_mi_handle ( ibdev, mi, mad, av ) ) != 0 )
+	if ( ( rc = ib_mi_handle ( ibdev, mi, mad, source ) ) != 0 )
 		goto out;
 
  out:
@@ -161,6 +164,11 @@ static void ib_mi_complete_recv ( struct ib_device *ibdev,
 /** Management interface completion operations */
 static struct ib_completion_queue_operations ib_mi_completion_ops = {
 	.complete_recv = ib_mi_complete_recv,
+};
+
+/** Management interface queue pair operations */
+static struct ib_queue_pair_operations ib_mi_queue_pair_ops = {
+	.alloc_iob = alloc_iob,
 };
 
 /**
@@ -352,7 +360,8 @@ struct ib_mad_interface * ib_create_mi ( struct ib_device *ibdev,
 
 	/* Create queue pair */
 	mi->qp = ib_create_qp ( ibdev, type, IB_MI_NUM_SEND_WQES, mi->cq,
-				IB_MI_NUM_RECV_WQES, mi->cq );
+				IB_MI_NUM_RECV_WQES, mi->cq,
+				&ib_mi_queue_pair_ops );
 	if ( ! mi->qp ) {
 		DBGC ( mi, "MI %p could not allocate queue pair\n", mi );
 		goto err_create_qp;

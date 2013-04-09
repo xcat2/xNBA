@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 #include <stdint.h>
@@ -108,7 +109,8 @@ static struct command_descriptor clear_read_cmd =
  */
 static int set_core_exec ( int argc, char **argv,
 			   struct command_descriptor *cmd,
-			   int ( * get_value ) ( char **args, char **value ) ) {
+			   int ( * get_value ) ( const char *name,
+						 char **args, char **value ) ) {
 	struct set_core_options opts;
 	const char *name;
 	char *value;
@@ -122,11 +124,12 @@ static int set_core_exec ( int argc, char **argv,
 	name = argv[optind];
 
 	/* Parse setting value */
-	if ( ( rc = get_value ( &argv[ optind + 1 ], &value ) ) != 0 )
+	if ( ( rc = get_value ( name, &argv[ optind + 1 ], &value ) ) != 0 )
 		goto err_get_value;
 
 	/* Determine total length of command line */
-	if ( ( rc = storef_named_setting ( name, value ) ) != 0 ) {
+	if ( ( rc = storef_named_setting ( name, &setting_type_string,
+					   value ) ) != 0 ) {
 		printf ( "Could not %s \"%s\": %s\n",
 			 argv[0], name, strerror ( rc ) );
 		goto err_store;
@@ -145,11 +148,12 @@ static int set_core_exec ( int argc, char **argv,
 /**
  * Get setting value for "set" command
  *
+ * @v name		Setting name
  * @v args		Remaining arguments
  * @ret value		Setting value
  * @ret rc		Return status code
  */
-static int set_value ( char **args, char **value ) {
+static int set_value ( const char *name __unused, char **args, char **value ) {
 
 	*value = concat_args ( args );
 	if ( ! *value )
@@ -172,11 +176,13 @@ static int set_exec ( int argc, char **argv ) {
 /**
  * Get setting value for "clear" command
  *
+ * @v name		Setting name
  * @v args		Remaining arguments
  * @ret value		Setting value
  * @ret rc		Return status code
  */
-static int clear_value ( char **args __unused, char **value ) {
+static int clear_value ( const char *name __unused, char **args __unused,
+			 char **value ) {
 
 	*value = NULL;
 	return 0;
@@ -196,16 +202,30 @@ static int clear_exec ( int argc, char **argv ) {
 /**
  * Get setting value for "read" command
  *
+ * @v name		Setting name
+ * @v args		Remaining arguments
  * @ret value		Setting value
  * @ret rc		Return status code
  */
-static int read_value ( char **args __unused, char **value ) {
+static int read_value ( const char *name, char **args __unused, char **value ) {
+	char *existing;
+	int rc;
 
-	*value = readline ( NULL );
-	if ( ! *value )
-		return -ENOMEM;
+	/* Read existing value */
+	if ( ( rc = fetchf_named_setting_copy ( name, &existing ) ) < 0 )
+		goto err_existing;
 
-	return 0;
+	/* Read new value */
+	if ( ( rc = readline_history ( NULL, existing, NULL, value ) ) != 0 )
+		goto err_new;
+
+	/* Success */
+	rc = 0;
+
+ err_new:
+	free ( existing );
+ err_existing:
+	return rc;
 }
 
 /**

@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -37,10 +38,6 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 int dhcp ( struct net_device *netdev ) {
-	struct dhcphdr *dhcphdr;
-	typeof ( dhcphdr->chaddr ) chaddr;
-	unsigned int hlen;
-	unsigned int i;
 	int rc;
 
 	/* Check we can open the interface first */
@@ -52,12 +49,8 @@ int dhcp ( struct net_device *netdev ) {
 		return rc;
 
 	/* Perform DHCP */
-	printf ( "DHCP (%s", netdev->name );
-	hlen = dhcp_chaddr ( netdev, chaddr, NULL );
-	for ( i = 0 ; i < hlen ; i++ )
-		printf ( "%c%02x", ( i ? ':' : ' ' ), chaddr[i] );
-	printf ( ")" );
-
+	printf ( "DHCP (%s %s)", netdev->name,
+		 netdev->ll_protocol->ntoa ( netdev->ll_addr ) );
 	if ( ( rc = start_dhcp ( &monojob, netdev ) ) == 0 ) {
 		rc = monojob_wait ( "" );
 	} else if ( rc > 0 ) {

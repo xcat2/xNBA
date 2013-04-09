@@ -15,7 +15,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -385,9 +386,6 @@ static struct net_device_operations net80211_netdev_ops = {
 
 
 /* ---------- 802.11 link-layer protocol ---------- */
-
-/** 802.11 broadcast MAC address */
-static u8 net80211_ll_broadcast[] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
 /**
  * Determine whether a transmission rate uses ERP/OFDM
@@ -762,7 +760,7 @@ struct net80211_device * net80211_alloc ( size_t priv_size )
 		return NULL;
 
 	netdev->ll_protocol = &net80211_ll_protocol;
-	netdev->ll_broadcast = net80211_ll_broadcast;
+	netdev->ll_broadcast = eth_broadcast;
 	netdev->max_pkt_len = IEEE80211_MAX_DATA_LEN;
 	netdev_init ( netdev, &net80211_netdev_ops );
 
@@ -1398,7 +1396,7 @@ int net80211_probe_step ( struct net80211_probe_ctx *ctx )
 
 			ctx->probe = iob;
 			rc = net80211_tx_mgmt ( dev, IEEE80211_STYPE_PROBE_REQ,
-						net80211_ll_broadcast,
+						eth_broadcast,
 						iob_disown ( siob ) );
 			if ( rc ) {
 				DBGC ( dev, "802.11 %p send probe failed: "

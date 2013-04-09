@@ -1,44 +1,46 @@
-#ifndef ETHERBOOT_BITS_STRING_H
-#define ETHERBOOT_BITS_STRING_H
-/*
- * Taken from Linux /usr/include/asm/string.h
- * All except memcpy, memmove, memset and memcmp removed.
- *
- * Non-standard memswap() function added because it saves quite a bit
- * of code (mbrown@fensystems.co.uk).
- */
+#ifndef X86_BITS_STRING_H
+#define X86_BITS_STRING_H
 
 /*
- * This string-include defines all string functions as inline
- * functions. Use gcc. It also assumes ds=es=data space, this should be
- * normal. Most of the string-functions are rather heavily hand-optimized,
- * see especially strtok,strstr,str[c]spn. They should work, but are not
- * very easy to understand. Everything is done entirely within the register
- * set, making the functions fast and clean. String instructions have been
- * used through-out, making for "slightly" unclear code :-)
+ * Copyright (C) 2007 Michael Brown <mbrown@fensystems.co.uk>.
  *
- *		NO Copyright (C) 1991, 1992 Linus Torvalds,
- *		consider these trivial functions to be PD.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of the
+ * License, or any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
-FILE_LICENCE ( PUBLIC_DOMAIN );
+FILE_LICENCE ( GPL2_OR_LATER );
+
+/** @file
+ *
+ * Optimised string operations
+ *
+ */
 
 #define __HAVE_ARCH_MEMCPY
 
 extern void * __memcpy ( void *dest, const void *src, size_t len );
+extern void * __memcpy_reverse ( void *dest, const void *src, size_t len );
 
-#if 0
-static inline __attribute__ (( always_inline )) void *
-__memcpy ( void *dest, const void *src, size_t len ) {
-	int d0, d1, d2;
-	__asm__ __volatile__ ( "rep ; movsb"
-			       : "=&c" ( d0 ), "=&S" ( d1 ), "=&D" ( d2 )
-			       : "0" ( len ), "1" ( src ), "2" ( dest )
-			       : "memory" );
-	return dest; 
-}
-#endif
-
+/**
+ * Copy memory area (where length is a compile-time constant)
+ *
+ * @v dest		Destination address
+ * @v src		Source address
+ * @v len		Length
+ * @ret dest		Destination address
+ */
 static inline __attribute__ (( always_inline )) void *
 __constant_memcpy ( void *dest, const void *src, size_t len ) {
 	union {
@@ -150,103 +152,81 @@ __constant_memcpy ( void *dest, const void *src, size_t len ) {
 	return dest;
 }
 
-#define memcpy( dest, src, len )			\
-	( __builtin_constant_p ( (len) ) ?		\
-	  __constant_memcpy ( (dest), (src), (len) ) :	\
-	  __memcpy ( (dest), (src), (len) ) )
+/**
+ * Copy memory area
+ *
+ * @v dest		Destination address
+ * @v src		Source address
+ * @v len		Length
+ * @ret dest		Destination address
+ */
+static inline __attribute__ (( always_inline )) void *
+memcpy ( void *dest, const void *src, size_t len ) {
+	if ( __builtin_constant_p ( len ) ) {
+		return __constant_memcpy ( dest, src, len );
+	} else {
+		return __memcpy ( dest, src, len );
+	}
+}
 
 #define __HAVE_ARCH_MEMMOVE
-static inline void * memmove(void * dest,const void * src, size_t n)
-{
-int d0, d1, d2;
-if (dest<src)
-__asm__ __volatile__(
-	"cld\n\t"
-	"rep\n\t"
-	"movsb"
-	: "=&c" (d0), "=&S" (d1), "=&D" (d2)
-	:"0" (n),"1" (src),"2" (dest)
-	: "memory");
-else
-__asm__ __volatile__(
-	"std\n\t"
-	"rep\n\t"
-	"movsb\n\t"
-	"cld"
-	: "=&c" (d0), "=&S" (d1), "=&D" (d2)
-	:"0" (n),
-	 "1" (n-1+(const char *)src),
-	 "2" (n-1+(char *)dest)
-	:"memory");
-return dest;
+
+extern void * __memmove ( void *dest, const void *src, size_t len );
+
+/**
+ * Copy (possibly overlapping) memory area
+ *
+ * @v dest		Destination address
+ * @v src		Source address
+ * @v len		Length
+ * @ret dest		Destination address
+ */
+static inline __attribute__ (( always_inline )) void *
+memmove ( void *dest, const void *src, size_t len ) {
+	ssize_t offset = ( dest - src );
+
+	if ( __builtin_constant_p ( offset ) ) {
+		if ( offset <= 0 ) {
+			return memcpy ( dest, src, len );
+		} else {
+			return __memcpy_reverse ( dest, src, len );
+		}
+	} else {
+		return __memmove ( dest, src, len );
+	}
 }
 
 #define __HAVE_ARCH_MEMSET
-static inline void * memset(void *s, int c,size_t count)
-{
-int d0, d1;
-__asm__ __volatile__(
-	"cld\n\t"
-	"rep\n\t"
-	"stosb"
-	: "=&c" (d0), "=&D" (d1)
-	:"a" (c),"1" (s),"0" (count)
-	:"memory");
-return s;
+
+/**
+ * Fill memory region
+ *
+ * @v dest		Destination address
+ * @v fill		Fill pattern
+ * @v len		Length
+ * @ret dest		Destination address
+ */
+static inline void * memset ( void *dest, int fill, size_t len ) {
+	void *discard_D;
+	size_t discard_c;
+
+	__asm__ __volatile__ ( "rep stosb"
+			       : "=&D" ( discard_D ), "=&c" ( discard_c )
+			       : "0" ( dest ), "1" ( len ), "a" ( fill )
+			       : "memory" );
+	return dest;
 }
 
 #define __HAVE_ARCH_MEMSWAP
-static inline void * memswap(void *dest, void *src, size_t n)
-{
-long d0, d1, d2, d3;
-__asm__ __volatile__(
-	"\n1:\t"
-	"movb (%2),%%al\n\t"
-	"xchgb (%1),%%al\n\t"
-	"inc %1\n\t"
-	"stosb\n\t"
-	"loop 1b"
-	: "=&c" (d0), "=&S" (d1), "=&D" (d2), "=&a" (d3)
-	: "0" (n), "1" (src), "2" (dest)
-	: "memory" );
-return dest;
-}
+
+extern void * memswap ( void *dest, void *src, size_t len );
 
 #define __HAVE_ARCH_STRNCMP
-static inline int strncmp(const char * cs,const char * ct,size_t count)
-{
-register int __res;
-int d0, d1, d2;
-__asm__ __volatile__(
-	"1:\tdecl %3\n\t"
-	"js 2f\n\t"
-	"lodsb\n\t"
-	"scasb\n\t"
-	"jne 3f\n\t"
-	"testb %%al,%%al\n\t"
-	"jne 1b\n"
-	"2:\txorl %%eax,%%eax\n\t"
-	"jmp 4f\n"
-	"3:\tsbbl %%eax,%%eax\n\t"
-	"orb $1,%%al\n"
-	"4:"
-		     :"=a" (__res), "=&S" (d0), "=&D" (d1), "=&c" (d2)
-		     :"1" (cs),"2" (ct),"3" (count));
-return __res;
-}
+
+extern int strncmp ( const char *str1, const char *str2, size_t len );
 
 #define __HAVE_ARCH_STRLEN
-static inline size_t strlen(const char * s)
-{
-int d0;
-register int __res;
-__asm__ __volatile__(
-	"repne\n\t"
-	"scasb\n\t"
-	"notl %0\n\t"
-	"decl %0"
-	:"=c" (__res), "=&D" (d0) :"1" (s),"a" (0), "0" (0xffffffff));
-return __res;
-}
 
-#endif /* ETHERBOOT_BITS_STRING_H */
+extern size_t strlen ( const char *string );
+
+#endif /* X86_BITS_STRING_H */

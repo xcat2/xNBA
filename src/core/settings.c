@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  */
 
 FILE_LICENCE ( GPL2_OR_LATER );
@@ -31,6 +32,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/dhcp.h>
 #include <ipxe/uuid.h>
 #include <ipxe/uri.h>
+#include <ipxe/init.h>
 #include <ipxe/settings.h>
 
 /** @file
@@ -178,6 +180,11 @@ int generic_settings_fetch ( struct settings *settings,
 	if ( len > generic->data_len )
 		len = generic->data_len;
 	memcpy ( data, generic_setting_data ( generic ), len );
+
+	/* Set setting type, if not yet specified */
+	if ( ! setting->type )
+		setting->type = generic->setting.type;
+
 	return generic->data_len;
 }
 
@@ -258,8 +265,8 @@ static void autovivified_settings_free ( struct refcnt *refcnt ) {
  * @v name		Name within this parent
  * @ret settings	Settings block, or NULL
  */
-static struct settings * find_child_settings ( struct settings *parent,
-					       const char *name ) {
+struct settings * find_child_settings ( struct settings *parent,
+					const char *name ) {
 	struct settings *settings;
 
 	/* Treat empty name as meaning "this block" */
@@ -612,8 +619,12 @@ static int fetch_setting_and_origin ( struct settings *settings,
 	if ( setting_applies ( settings, setting ) &&
 	     ( ( ret = settings->op->fetch ( settings, setting,
 					     data, len ) ) >= 0 ) ) {
+		/* Record origin, if applicable */
 		if ( origin )
 			*origin = settings;
+		/* Default to string setting type, if not yet specified */
+		if ( ! setting->type )
+			setting->type = &setting_type_string;
 		return ret;
 	}
 
@@ -1041,8 +1052,8 @@ int storef_setting ( struct settings *settings, struct setting *setting,
 	int check_len;
 	int rc;
 
-	/* NULL value implies deletion */
-	if ( ! value )
+	/* NULL value or empty string implies deletion */
+	if ( ( ! value ) || ( ! value[0] ) )
 		return delete_setting ( settings, setting );
 
 	/* Parse formatted value */
@@ -1130,6 +1141,7 @@ static struct setting_type * find_setting_type ( const char *name ) {
  * @v get_child		Function to find or create child settings block
  * @v settings		Settings block to fill in
  * @v setting		Setting to fill in
+ * @v default_type	Default type to use, if none specified
  * @v tmp_name		Buffer for copy of setting name
  * @ret rc		Return status code
  *
@@ -1145,6 +1157,7 @@ parse_setting_name ( const char *name,
 		     struct settings * ( * get_child ) ( struct settings *,
 							 const char * ),
 		     struct settings **settings, struct setting *setting,
+		     struct setting_type *default_type,
 		     char *tmp_name ) {
 	char *settings_name;
 	char *setting_name;
@@ -1155,7 +1168,7 @@ parse_setting_name ( const char *name,
 	*settings = &settings_root;
 	memset ( setting, 0, sizeof ( *setting ) );
 	setting->name = "";
-	setting->type = &setting_type_string;
+	setting->type = default_type;
 
 	/* Split name into "[settings_name/]setting_name[:type_name]" */
 	strcpy ( tmp_name, name );
@@ -1225,13 +1238,16 @@ int setting_name ( struct settings *settings, struct setting *setting,
 }
 
 /**
- * Parse and store value of named setting
+ * Store value of named setting
  *
  * @v name		Name of setting
- * @v value		Formatted setting data, or NULL
+ * @v default_type	Default type to use, if none specified
+ * @v data		Setting data, or NULL to clear setting
+ * @v len		Length of setting data
  * @ret rc		Return status code
  */
-int storef_named_setting ( const char *name, const char *value ) {
+int store_named_setting ( const char *name, struct setting_type *default_type,
+			  const void *data, size_t len ) {
 	struct settings *settings;
 	struct setting setting;
 	char tmp_name[ strlen ( name ) + 1 ];
@@ -1239,7 +1255,36 @@ int storef_named_setting ( const char *name, const char *value ) {
 
 	/* Parse setting name */
 	if ( ( rc = parse_setting_name ( name, autovivify_child_settings,
-					 &settings, &setting, tmp_name )) != 0)
+					 &settings, &setting, default_type,
+					 tmp_name ) ) != 0 )
+		return rc;
+
+	/* Store setting */
+	if ( ( rc = store_setting ( settings, &setting, data, len ) ) != 0 )
+		return rc;
+
+	return 0;
+}
+
+/**
+ * Parse and store value of named setting
+ *
+ * @v name		Name of setting
+ * @v default_type	Default type to use, if none specified
+ * @v value		Formatted setting data, or NULL
+ * @ret rc		Return status code
+ */
+int storef_named_setting ( const char *name, struct setting_type *default_type,
+			   const char *value ) {
+	struct settings *settings;
+	struct setting setting;
+	char tmp_name[ strlen ( name ) + 1 ];
+	int rc;
+
+	/* Parse setting name */
+	if ( ( rc = parse_setting_name ( name, autovivify_child_settings,
+					 &settings, &setting, default_type,
+					 tmp_name ) ) != 0 )
 		return rc;
 
 	/* Store setting */
@@ -1270,8 +1315,8 @@ int fetchf_named_setting ( const char *name,
 	int rc;
 
 	/* Parse setting name */
-	if ( ( rc = parse_setting_name ( name, find_child_settings,
-					 &settings, &setting, tmp_name )) != 0)
+	if ( ( rc = parse_setting_name ( name, find_child_settings, &settings,
+					 &setting, NULL, tmp_name ) ) != 0 )
 		return rc;
 
 	/* Fetch setting */
@@ -1284,6 +1329,45 @@ int fetchf_named_setting ( const char *name,
 	assert ( origin != NULL );
 	setting_name ( origin, &setting, name_buf, name_len );
 
+	return len;
+}
+
+/**
+ * Fetch and format copy of value of named setting
+ *
+ * @v name		Name of setting
+ * @v data		Buffer to allocate and fill with formatted value
+ * @ret len		Length of formatted value, or negative error
+ *
+ * The caller is responsible for eventually freeing the allocated
+ * buffer.
+ *
+ * To allow the caller to distinguish between a non-existent setting
+ * and an error in allocating memory for the copy, this function will
+ * return success (and a NULL buffer pointer) for a non-existent
+ * setting.
+ */
+int fetchf_named_setting_copy ( const char *name, char **data ) {
+	int len;
+	int check_len;
+
+	/* Avoid returning uninitialised data on error */
+	*data = NULL;
+
+	/* Fetch formatted value length, and return success if non-existent */
+	len = fetchf_named_setting ( name, NULL, 0, NULL, 0 );
+	if ( len < 0 )
+		return 0;
+
+	/* Allocate buffer */
+	*data = malloc ( len + 1 /* NUL */ );
+	if ( ! *data )
+		return -ENOMEM;
+
+	/* Fetch formatted value */
+	check_len = fetchf_named_setting ( name, NULL, 0, *data,
+					   ( len + 1 /* NUL */ ) );
+	assert ( check_len == len );
 	return len;
 }
 
@@ -1838,6 +1922,14 @@ struct setting hostname_setting __setting ( SETTING_HOST ) = {
 	.type = &setting_type_string,
 };
 
+/** Domain name setting */
+struct setting domain_setting __setting ( SETTING_IPv4_EXTRA ) = {
+	.name = "domain",
+	.description = "DNS domain",
+	.tag = DHCP_DOMAIN_NAME,
+	.type = &setting_type_string,
+};
+
 /** TFTP server setting */
 struct setting next_server_setting __setting ( SETTING_BOOT ) = {
 	.name = "next-server",
@@ -1884,4 +1976,193 @@ struct setting priority_setting __setting ( SETTING_MISC ) = {
 	.description = "Settings priority",
 	.tag = DHCP_EB_PRIORITY,
 	.type = &setting_type_int8,
+};
+
+/******************************************************************************
+ *
+ * Built-in settings block
+ *
+ ******************************************************************************
+ */
+
+/** A built-in setting operation */
+struct builtin_setting_operation {
+	/** Setting */
+	struct setting *setting;
+	/** Fetch setting value
+	 *
+	 * @v data		Buffer to fill with setting data
+	 * @v len		Length of buffer
+	 * @ret len		Length of setting data, or negative error
+	 */
+	int ( * fetch ) ( void *data, size_t len );
+};
+
+/** Built-in setting tag magic */
+#define BUILTIN_SETTING_TAG_MAGIC 0xb1
+
+/**
+ * Construct built-in setting tag
+ *
+ * @v id		Unique identifier
+ * @ret tag		Setting tag
+ */
+#define BUILTIN_SETTING_TAG( id ) ( ( BUILTIN_SETTING_TAG_MAGIC << 24 ) | (id) )
+
+/** "errno" setting tag */
+#define BUILTIN_SETTING_TAG_ERRNO BUILTIN_SETTING_TAG ( 0x01 )
+
+/** Error number setting */
+struct setting errno_setting __setting ( SETTING_MISC ) = {
+	.name = "errno",
+	.description = "Last error",
+	.tag = BUILTIN_SETTING_TAG_ERRNO,
+	.type = &setting_type_uint32,
+};
+
+/**
+ * Fetch error number setting
+ *
+ * @v data		Buffer to fill with setting data
+ * @v len		Length of buffer
+ * @ret len		Length of setting data, or negative error
+ */
+static int errno_fetch ( void *data, size_t len ) {
+	uint32_t content;
+
+	/* Return current error */
+	content = htonl ( errno );
+	if ( len > sizeof ( content ) )
+		len = sizeof ( content );
+	memcpy ( data, &content, len );
+	return sizeof ( content );
+}
+
+/** "buildarch" setting tag */
+#define BUILTIN_SETTING_TAG_BUILDARCH BUILTIN_SETTING_TAG ( 0x02 )
+
+/** Build architecture setting */
+struct setting buildarch_setting __setting ( SETTING_MISC ) = {
+	.name = "buildarch",
+	.description = "Build architecture",
+	.tag = BUILTIN_SETTING_TAG_BUILDARCH,
+	.type = &setting_type_string,
+};
+
+/**
+ * Fetch build architecture setting
+ *
+ * @v data		Buffer to fill with setting data
+ * @v len		Length of buffer
+ * @ret len		Length of setting data, or negative error
+ */
+static int buildarch_fetch ( void *data, size_t len ) {
+	static const char buildarch[] = _S2 ( ARCH );
+
+	strncpy ( data, buildarch, len );
+	return ( sizeof ( buildarch ) - 1 /* NUL */ );
+}
+
+/** "platform" setting tag */
+#define BUILTIN_SETTING_TAG_PLATFORM BUILTIN_SETTING_TAG ( 0x03 )
+
+/** Platform setting */
+struct setting platform_setting __setting ( SETTING_MISC ) = {
+	.name = "platform",
+	.description = "Platform",
+	.tag = BUILTIN_SETTING_TAG_PLATFORM,
+	.type = &setting_type_string,
+};
+
+/**
+ * Fetch platform setting
+ *
+ * @v data		Buffer to fill with setting data
+ * @v len		Length of buffer
+ * @ret len		Length of setting data, or negative error
+ */
+static int platform_fetch ( void *data, size_t len ) {
+	static const char platform[] = _S2 ( PLATFORM );
+
+	strncpy ( data, platform, len );
+	return ( sizeof ( platform ) - 1 /* NUL */ );
+}
+
+/** List of built-in setting operations */
+static struct builtin_setting_operation builtin_setting_operations[] = {
+	{ &errno_setting, errno_fetch },
+	{ &buildarch_setting, buildarch_fetch },
+	{ &platform_setting, platform_fetch },
+};
+
+/**
+ * Fetch built-in setting
+ *
+ * @v settings		Settings block
+ * @v setting		Setting to fetch
+ * @v data		Buffer to fill with setting data
+ * @v len		Length of buffer
+ * @ret len		Length of setting data, or negative error
+ */
+static int builtin_fetch ( struct settings *settings __unused,
+			   struct setting *setting,
+			   void *data, size_t len ) {
+	struct builtin_setting_operation *builtin;
+	unsigned int i;
+
+	for ( i = 0 ; i < ( sizeof ( builtin_setting_operations ) /
+			    sizeof ( builtin_setting_operations[0] ) ) ; i++ ) {
+		builtin = &builtin_setting_operations[i];
+		if ( setting_cmp ( setting, builtin->setting ) == 0 )
+			return builtin->fetch ( data, len );
+	}
+	return -ENOENT;
+}
+
+/**
+ * Check applicability of built-in setting
+ *
+ * @v settings		Settings block
+ * @v setting		Setting
+ * @ret applies		Setting applies within this settings block
+ */
+static int builtin_applies ( struct settings *settings __unused,
+			     struct setting *setting ) {
+	unsigned int tag_magic;
+
+	/* Check tag magic */
+	tag_magic = ( setting->tag >> 24 );
+	return ( tag_magic == BUILTIN_SETTING_TAG_MAGIC );
+}
+
+/** Built-in settings operations */
+static struct settings_operations builtin_settings_operations = {
+	.applies = builtin_applies,
+	.fetch = builtin_fetch,
+};
+
+/** Built-in settings */
+static struct settings builtin_settings = {
+	.refcnt = NULL,
+	.tag_magic = BUILTIN_SETTING_TAG ( 0 ),
+	.siblings = LIST_HEAD_INIT ( builtin_settings.siblings ),
+	.children = LIST_HEAD_INIT ( builtin_settings.children ),
+	.op = &builtin_settings_operations,
+};
+
+/** Initialise built-in settings */
+static void builtin_init ( void ) {
+	int rc;
+
+	if ( ( rc = register_settings ( &builtin_settings, NULL,
+					"builtin" ) ) != 0 ) {
+		DBG ( "Could not register built-in settings: %s\n",
+		      strerror ( rc ) );
+		return;
+	}
+}
+
+/** Built-in settings initialiser */
+struct init_fn builtin_init_fn __init_fn ( INIT_NORMAL ) = {
+	.initialise = builtin_init,
 };

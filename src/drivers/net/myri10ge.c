@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  ****************************************************************/
 
 FILE_LICENCE ( GPL2_ONLY );
@@ -718,7 +719,7 @@ static int myri10ge_nv_init ( struct myri10ge_private *priv )
 		return 0;
 	}
 
-	/* Initilize NonVolatile Storage state. */
+	/* Initialize NonVolatile Storage state. */
 
 	priv->nvs.word_len_log2 = 0;
 	priv->nvs.size		= hdr.eeprom_len;

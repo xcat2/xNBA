@@ -14,7 +14,8 @@ package Option::ROM;
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.
 
 =head1 NAME
 
@@ -169,13 +170,17 @@ use Exporter 'import';
 
 use constant ROM_SIGNATURE => 0xaa55;
 use constant PCI_SIGNATURE => 'PCIR';
+use constant PCI_LAST_IMAGE => 0x80;
 use constant PNP_SIGNATURE => '$PnP';
+use constant IPXE_SIGNATURE => 'iPXE';
 
-our @EXPORT_OK = qw ( ROM_SIGNATURE PCI_SIGNATURE PNP_SIGNATURE );
+our @EXPORT_OK = qw ( ROM_SIGNATURE PCI_SIGNATURE PCI_LAST_IMAGE
+		      PNP_SIGNATURE IPXE_SIGNATURE );
 our %EXPORT_TAGS = ( all => [ @EXPORT_OK ] );
 
 use constant JMP_SHORT => 0xeb;
 use constant JMP_NEAR => 0xe9;
+use constant CALL_NEAR => 0xe8;
 
 sub pack_init {
   my $dest = shift;
@@ -197,6 +202,9 @@ sub unpack_init {
     my $offset = unpack ( "xC", $instr );
     return ( $offset + 5 );
   } elsif ( $jump == JMP_NEAR ) {
+    my $offset = unpack ( "xS", $instr );
+    return ( $offset + 6 );
+  } elsif ( $jump == CALL_NEAR ) {
     my $offset = unpack ( "xS", $instr );
     return ( $offset + 6 );
   } elsif ( $jump == 0 ) {
@@ -229,6 +237,7 @@ sub new {
       init =>		{ offset => 0x03, length => 0x03,
 			  pack => \&pack_init, unpack => \&unpack_init },
       checksum =>	{ offset => 0x06, length => 0x01, pack => "C" },
+      ipxe_header =>	{ offset => 0x10, length => 0x02, pack => "S" },
       bofm_header =>	{ offset => 0x14, length => 0x02, pack => "S" },
       undi_header =>	{ offset => 0x16, length => 0x02, pack => "S" },
       pci_header =>	{ offset => 0x18, length => 0x02, pack => "S" },
@@ -237,6 +246,53 @@ sub new {
   };
   bless $hash, $class;
   return $hash;
+}
+
+=pod
+
+=item C<< set ( $data ) >>
+
+Set option ROM contents.
+
+=cut
+
+sub set {
+  my $hash = shift;
+  my $self = tied(%$hash);
+  my $data = shift;
+
+  # Store data
+  $self->{data} = \$data;
+
+  # Split out any data belonging to the next image
+  delete $self->{next_image};
+  my $length = ( $hash->{length} * 512 );
+  my $pci_header = $hash->pci_header();
+  if ( ( $length < length $data ) &&
+       ( defined $pci_header ) &&
+       ( ! ( $pci_header->{last_image} & PCI_LAST_IMAGE ) ) ) {
+    my $remainder = substr ( $data, $length );
+    $data = substr ( $data, 0, $length );
+    $self->{next_image} = new Option::ROM;
+    $self->{next_image}->set ( $remainder );
+  }
+}
+
+=pod
+
+=item C<< get () >>
+
+Get option ROM contents.
+
+=cut
+
+sub get {
+  my $hash = shift;
+  my $self = tied(%$hash);
+
+  my $data = ${$self->{data}};
+  $data .= $self->{next_image}->get() if $self->{next_image};
+  return $data;
 }
 
 =pod
@@ -256,8 +312,8 @@ sub load {
 
   open my $fh, "<$filename"
       or croak "Cannot open $filename for reading: $!";
-  read $fh, my $data, ( 128 * 1024 ); # 128kB is theoretical max size
-  $self->{data} = \$data;
+  read $fh, my $data, -s $fh;
+  $hash->set ( $data );
   close $fh;
 }
 
@@ -279,7 +335,8 @@ sub save {
 
   open my $fh, ">$filename"
       or croak "Cannot open $filename for writing: $!";
-  print $fh ${$self->{data}};
+  my $data = $hash->get();
+  print $fh $data;
   close $fh;
 }
 
@@ -335,6 +392,60 @@ sub pnp_header {
   return undef unless $offset != 0;
 
   return Option::ROM::PnP->new ( $self->{data}, $offset );
+}
+
+=pod
+
+=item C<< undi_header () >>
+
+Return a C<Option::ROM::UNDI> object representing the ROM's UNDI header,
+if present.
+
+=cut
+
+sub undi_header {
+  my $hash = shift;
+  my $self = tied(%$hash);
+
+  my $offset = $hash->{undi_header};
+  return undef unless $offset != 0;
+
+  return Option::ROM::UNDI->new ( $self->{data}, $offset );
+}
+
+=pod
+
+=item C<< ipxe_header () >>
+
+Return a C<Option::ROM::iPXE> object representing the ROM's iPXE
+header, if present.
+
+=cut
+
+sub ipxe_header {
+  my $hash = shift;
+  my $self = tied(%$hash);
+
+  my $offset = $hash->{ipxe_header};
+  return undef unless $offset != 0;
+
+  return Option::ROM::iPXE->new ( $self->{data}, $offset );
+}
+
+=pod
+
+=item C<< next_image () >>
+
+Return a C<Option::ROM> object representing the next image within the
+ROM, if present.
+
+=cut
+
+sub next_image {
+  my $hash = shift;
+  my $self = tied(%$hash);
+
+  return $self->{next_image};
 }
 
 =pod
@@ -497,6 +608,121 @@ sub product {
 
   my $raw = substr ( ${$self->{data}}, $product );
   return unpack ( "Z*", $raw );
+}
+
+##############################################################################
+#
+# Option::ROM::UNDI
+#
+##############################################################################
+
+package Option::ROM::UNDI;
+
+use strict;
+use warnings;
+use Carp;
+use bytes;
+
+sub new {
+  my $class = shift;
+  my $data = shift;
+  my $offset = shift;
+
+  my $hash = {};
+  tie %$hash, "Option::ROM::Fields", {
+    data => $data,
+    offset => $offset,
+    length => 0x16,
+    fields => {
+      signature =>	{ offset => 0x00, length => 0x04, pack => "a4" },
+      struct_length =>	{ offset => 0x04, length => 0x01, pack => "C" },
+      checksum =>	{ offset => 0x05, length => 0x01, pack => "C" },
+      struct_revision =>{ offset => 0x06, length => 0x01, pack => "C" },
+      version_revision =>{ offset => 0x07, length => 0x01, pack => "C" },
+      version_minor =>	{ offset => 0x08, length => 0x01, pack => "C" },
+      version_major =>	{ offset => 0x09, length => 0x01, pack => "C" },
+      loader_entry =>	{ offset => 0x0a, length => 0x02, pack => "S" },
+      stack_size =>	{ offset => 0x0c, length => 0x02, pack => "S" },
+      data_size =>	{ offset => 0x0e, length => 0x02, pack => "S" },
+      code_size =>	{ offset => 0x10, length => 0x02, pack => "S" },
+      bus_type =>	{ offset => 0x12, length => 0x04, pack => "a4" },
+    },
+  };
+  bless $hash, $class;
+
+  # Retrieve true length of structure
+  my $self = tied ( %$hash );
+  $self->{length} = $hash->{struct_length};
+
+  return $hash;
+}
+
+sub checksum {
+  my $hash = shift;
+  my $self = tied(%$hash);
+
+  return $self->checksum();
+}
+
+sub fix_checksum {
+  my $hash = shift;
+  my $self = tied(%$hash);
+
+  $hash->{checksum} = ( ( $hash->{checksum} - $hash->checksum() ) & 0xff );
+}
+
+##############################################################################
+#
+# Option::ROM::iPXE
+#
+##############################################################################
+
+package Option::ROM::iPXE;
+
+use strict;
+use warnings;
+use Carp;
+use bytes;
+
+sub new {
+  my $class = shift;
+  my $data = shift;
+  my $offset = shift;
+
+  my $hash = {};
+  tie %$hash, "Option::ROM::Fields", {
+    data => $data,
+    offset => $offset,
+    length => 0x06,
+    fields => {
+      signature =>	{ offset => 0x00, length => 0x04, pack => "a4" },
+      struct_length =>	{ offset => 0x04, length => 0x01, pack => "C" },
+      checksum =>	{ offset => 0x05, length => 0x01, pack => "C" },
+      shrunk_length =>	{ offset => 0x06, length => 0x01, pack => "C" },
+      build_id =>	{ offset => 0x08, length => 0x04, pack => "L" },
+    },
+  };
+  bless $hash, $class;
+
+  # Retrieve true length of structure
+  my $self = tied ( %$hash );
+  $self->{length} = $hash->{struct_length};
+
+  return $hash;
+}
+
+sub checksum {
+  my $hash = shift;
+  my $self = tied(%$hash);
+
+  return $self->checksum();
+}
+
+sub fix_checksum {
+  my $hash = shift;
+  my $self = tied(%$hash);
+
+  $hash->{checksum} = ( ( $hash->{checksum} - $hash->checksum() ) & 0xff );
 }
 
 1;
