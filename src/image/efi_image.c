@@ -142,13 +142,20 @@ static int efi_image_exec ( struct image *image ) {
 		void *interface;
 	} loaded;
 	EFI_HANDLE handle;
+	EFI_HANDLE nethandle;
+	EFI_DEVICE_PATH_PROTOCOL *netpath;
 	wchar_t *cmdline;
 	EFI_STATUS efirc;
 	int rc;
 
 	/* Find an appropriate device handle to use */
 	snpdev = last_opened_snpdev();
-	if ( ! snpdev ) {
+	netpath=NULL;
+	if ( snpdev ) {
+	} else if (1) {
+		nethandle = efi_loaded_image->DeviceHandle;
+		netpath = efi_loaded_image->FilePath;
+	} else {
 		DBGC ( image, "EFIIMAGE %p could not identify SNP device\n",
 		       image );
 		rc = -ENODEV;
@@ -156,21 +163,21 @@ static int efi_image_exec ( struct image *image ) {
 	}
 
 	/* Install file I/O protocols */
-	if ( ( rc = efi_file_install ( &snpdev->handle ) ) != 0 ) {
+	if ( ( rc = efi_file_install ( &nethandle ) ) != 0 ) {
 		DBGC ( image, "EFIIMAGE %p could not install file protocol: "
 		       "%s\n", image, strerror ( rc ) );
 		goto err_file_install;
 	}
 
 	/* Install iPXE download protocol */
-	if ( ( rc = efi_download_install ( &snpdev->handle ) ) != 0 ) {
+	if ( ( rc = efi_download_install ( &nethandle ) ) != 0 ) {
 		DBGC ( image, "EFIIMAGE %p could not install iPXE download "
 		       "protocol: %s\n", image, strerror ( rc ) );
 		goto err_download_install;
 	}
 
 	/* Create device path for image */
-	path = efi_image_path ( image, &snpdev->path );
+	path = efi_image_path ( image, netpath );
 	if ( ! path ) {
 		DBGC ( image, "EFIIMAGE %p could not create device path\n",
 		       image );
@@ -210,7 +217,9 @@ static int efi_image_exec ( struct image *image ) {
 
 	/* Sanity checks */
 	assert ( loaded.image->ParentHandle == efi_image_handle );
-	assert ( loaded.image->DeviceHandle == snpdev->handle );
+	loaded.image->ParentHandle = efi_loaded_image;
+	loaded.image->DeviceHandle = nethandle;
+	//assert ( loaded.image->DeviceHandle == nethandle );
 	assert ( loaded.image->LoadOptionsSize == 0 );
 	assert ( loaded.image->LoadOptions == NULL );
 
@@ -245,9 +254,9 @@ static int efi_image_exec ( struct image *image ) {
  err_cmdline:
 	free ( path );
  err_image_path:
-	efi_download_uninstall ( snpdev->handle );
+	efi_download_uninstall ( nethandle );
  err_download_install:
-	efi_file_uninstall ( snpdev->handle );
+	efi_file_uninstall ( nethandle );
  err_file_install:
  err_no_snpdev:
 	return rc;
