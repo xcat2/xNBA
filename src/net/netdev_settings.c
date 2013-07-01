@@ -162,6 +162,7 @@ struct netdev_setting_operation {
 /** Network device settings */
 static struct netdev_setting_operation netdev_setting_operations[] = {
 	{ &mac_setting, netdev_store_mac, netdev_fetch_mac },
+	{ &machyp_setting, netdev_store_mac, netdev_fetch_mac },
 	{ &busid_setting, NULL, netdev_fetch_busid },
 	{ &chip_setting, NULL, netdev_fetch_chip },
 };
