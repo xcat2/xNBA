@@ -127,6 +127,20 @@ static wchar_t * efi_image_cmdline ( struct image *image ) {
 	return cmdline;
 }
 
+static int check_boot_snp() {
+    EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
+    EFI_STATUS efirc;
+    void *snp;
+    EFI_GUID snpguid = EFI_SIMPLE_NETWORK_PROTOCOL_GUID;
+    efirc =  bs->OpenProtocol ( efi_loaded_image->DeviceHandle, 
+                   &snpguid,
+                   &snp, efi_image_handle, NULL, 
+                EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+    if (efirc) {
+        return -1;
+    }
+    return 1;
+}
 /**
  * Execute EFI image
  *
@@ -152,7 +166,9 @@ static int efi_image_exec ( struct image *image ) {
 	snpdev = last_opened_snpdev();
 	netpath=NULL;
 	if ( snpdev ) {
-	} else if (1) {
+        nethandle = snpdev->handle;
+        netpath = &snpdev->path;
+	} else if (check_boot_snp() > 0) {
 		nethandle = efi_loaded_image->DeviceHandle;
 		netpath = efi_loaded_image->FilePath;
 	} else {
