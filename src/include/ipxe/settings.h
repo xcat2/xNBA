@@ -77,6 +77,12 @@ struct setting {
 
 /** Settings block operations */
 struct settings_operations {
+	/** Redirect to underlying settings block (if applicable)
+	 *
+	 * @v settings		Settings block
+	 * @ret settings	Underlying settings block
+	 */
+	struct settings * ( * redirect ) ( struct settings *settings );
 	/** Check applicability of setting
 	 *
 	 * @v settings		Settings block
@@ -179,24 +185,47 @@ struct setting_type {
 	 * This is the name exposed to the user (e.g. "string").
 	 */
 	const char *name;
-	/** Parse formatted setting value
+	/** Parse formatted string to setting value
 	 *
+	 * @v type		Setting type
 	 * @v value		Formatted setting value
 	 * @v buf		Buffer to contain raw value
 	 * @v len		Length of buffer
 	 * @ret len		Length of raw value, or negative error
 	 */
-	int ( * parse ) ( const char *value, void *buf, size_t len );
-	/** Format setting value
+	int ( * parse ) ( struct setting_type *type, const char *value,
+			  void *buf, size_t len );
+	/** Format setting value as a string
 	 *
+	 * @v type		Setting type
 	 * @v raw		Raw setting value
 	 * @v raw_len		Length of raw setting value
 	 * @v buf		Buffer to contain formatted value
 	 * @v len		Length of buffer
 	 * @ret len		Length of formatted value, or negative error
 	 */
-	int ( * format ) ( const void *raw, size_t raw_len, char *buf,
-			   size_t len );
+	int ( * format ) ( struct setting_type *type, const void *raw,
+			   size_t raw_len, char *buf, size_t len );
+	/** Convert number to setting value
+	 *
+	 * @v type		Setting type
+	 * @v value		Numeric value
+	 * @v buf		Buffer to contain raw value
+	 * @v len		Length of buffer
+	 * @ret len		Length of raw value, or negative error
+	 */
+	int ( * denumerate ) ( struct setting_type *type, unsigned long value,
+			       void *buf, size_t len );
+	/** Convert setting value to number
+	 *
+	 * @v type		Setting type
+	 * @v raw		Raw setting value
+	 * @v raw_len		Length of raw setting value
+	 * @v value		Numeric value to fill in
+	 * @ret rc		Return status code
+	 */
+	int ( * numerate ) ( struct setting_type *type, const void *raw,
+			     size_t raw_len, unsigned long *value );
 };
 
 /** Configuration setting type table */
@@ -235,6 +264,9 @@ struct generic_settings {
 	struct list_head list;
 };
 
+/** A child settings block locator function */
+typedef struct settings * ( *get_child_settings_t ) ( struct settings *settings,
+						      const char *name );
 extern struct settings_operations generic_settings_operations;
 extern int generic_settings_store ( struct settings *settings,
 				    struct setting *setting,
@@ -248,6 +280,7 @@ extern int register_settings ( struct settings *settings,
 			       struct settings *parent, const char *name );
 extern void unregister_settings ( struct settings *settings );
 
+extern struct settings * settings_target ( struct settings *settings );
 extern int setting_applies ( struct settings *settings,
 			     struct setting *setting );
 extern int store_setting ( struct settings *settings, struct setting *setting,
@@ -288,27 +321,35 @@ extern int setting_cmp ( struct setting *a, struct setting *b );
 
 extern struct settings * find_child_settings ( struct settings *parent,
 					       const char *name );
+extern struct settings * autovivify_child_settings ( struct settings *parent,
+						     const char *name );
 extern const char * settings_name ( struct settings *settings );
 extern struct settings * find_settings ( const char *name );
 extern struct setting * find_setting ( const char *name );
-
+extern int parse_setting_name ( char *name, get_child_settings_t get_child,
+				struct settings **settings,
+				struct setting *setting );
 extern int setting_name ( struct settings *settings, struct setting *setting,
 			  char *buf, size_t len );
+extern int setting_format ( struct setting_type *type, const void *raw,
+			    size_t raw_len, char *buf, size_t len );
+extern int setting_parse ( struct setting_type *type, const char *value,
+			   void *buf, size_t len );
+extern int setting_numerate ( struct setting_type *type, const void *raw,
+			      size_t raw_len, unsigned long *value );
+extern int setting_denumerate ( struct setting_type *type, unsigned long value,
+				void *buf, size_t len );
 extern int fetchf_setting ( struct settings *settings, struct setting *setting,
 			    char *buf, size_t len );
+extern int fetchf_setting_copy ( struct settings *settings,
+				 struct setting *setting, char **value );
 extern int storef_setting ( struct settings *settings,
 			    struct setting *setting,
 			    const char *value );
-extern int store_named_setting ( const char *name,
-				 struct setting_type *default_type,
-				 const void *data, size_t len );
-extern int storef_named_setting ( const char *name,
-				  struct setting_type *default_type,
-				  const char *value );
-extern int fetchf_named_setting ( const char *name, char *name_buf,
-				  size_t name_len, char *value_buf,
-				  size_t value_len );
-extern int fetchf_named_setting_copy ( const char *name, char **data );
+extern int fetchn_setting ( struct settings *settings, struct setting *setting,
+			    unsigned long *value );
+extern int storen_setting ( struct settings *settings, struct setting *setting,
+			    unsigned long value );
 extern char * expand_settings ( const char *string );
 
 extern struct setting_type setting_type_string __setting_type;
@@ -322,7 +363,9 @@ extern struct setting_type setting_type_uint16 __setting_type;
 extern struct setting_type setting_type_uint32 __setting_type;
 extern struct setting_type setting_type_hex __setting_type;
 extern struct setting_type setting_type_hexhyp __setting_type;
+extern struct setting_type setting_type_hexraw __setting_type;
 extern struct setting_type setting_type_uuid __setting_type;
+extern struct setting_type setting_type_busdevfn __setting_type;
 
 extern struct setting ip_setting __setting ( SETTING_IPv4 );
 extern struct setting netmask_setting __setting ( SETTING_IPv4 );
@@ -382,16 +425,6 @@ static inline void generic_settings_init ( struct generic_settings *generics,
 static inline int delete_setting ( struct settings *settings,
 				   struct setting *setting ) {
 	return store_setting ( settings, setting, NULL, 0 );
-}
-
-/**
- * Delete named setting
- *
- * @v name		Name of setting
- * @ret rc		Return status code
- */
-static inline int delete_named_setting ( const char *name ) {
-	return store_named_setting ( name, NULL, NULL, 0 );
 }
 
 /**

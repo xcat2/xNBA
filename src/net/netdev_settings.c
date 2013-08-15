@@ -27,6 +27,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/settings.h>
 #include <ipxe/device.h>
 #include <ipxe/netdevice.h>
+#include <ipxe/init.h>
 
 /** @file
  *
@@ -34,7 +35,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
  *
  */
 
-/** Network device named settings */
+/** Network device predefined settings */
 struct setting mac_setting __setting ( SETTING_NETDEV ) = {
 	.name = "mac",
 	.description = "MAC address",
@@ -44,6 +45,16 @@ struct setting machyp_setting __setting ( SETTING_NETDEV ) = {
 	.name = "machyp",
 	.description = "MAC address",
 	.type = &setting_type_hexhyp,
+};
+struct setting bustype_setting __setting ( SETTING_NETDEV ) = {
+	.name = "bustype",
+	.description = "Bus type",
+	.type = &setting_type_string,
+};
+struct setting busloc_setting __setting ( SETTING_NETDEV ) = {
+	.name = "busloc",
+	.description = "Bus location",
+	.type = &setting_type_uint32,
 };
 struct setting busid_setting __setting ( SETTING_NETDEV ) = {
 	.name = "busid",
@@ -96,6 +107,54 @@ static int netdev_fetch_mac ( struct net_device *netdev, void *data,
 		len = netdev->ll_protocol->ll_addr_len;
 	memcpy ( data, netdev->ll_addr, len );
 	return netdev->ll_protocol->ll_addr_len;
+}
+
+/**
+ * Fetch bus type setting
+ *
+ * @v netdev		Network device
+ * @v data		Buffer to fill with setting data
+ * @v len		Length of buffer
+ * @ret len		Length of setting data, or negative error
+ */
+static int netdev_fetch_bustype ( struct net_device *netdev, void *data,
+				  size_t len ) {
+	static const char *bustypes[] = {
+		[BUS_TYPE_PCI] = "PCI",
+		[BUS_TYPE_ISAPNP] = "ISAPNP",
+		[BUS_TYPE_EISA] = "EISA",
+		[BUS_TYPE_MCA] = "MCA",
+		[BUS_TYPE_ISA] = "ISA",
+	};
+	struct device_description *desc = &netdev->dev->desc;
+	const char *bustype;
+
+	assert ( desc->bus_type < ( sizeof ( bustypes ) /
+				    sizeof ( bustypes[0] ) ) );
+	bustype = bustypes[desc->bus_type];
+	assert ( bustypes != NULL );
+	strncpy ( data, bustype, len );
+	return strlen ( bustype );
+}
+
+/**
+ * Fetch bus location setting
+ *
+ * @v netdev		Network device
+ * @v data		Buffer to fill with setting data
+ * @v len		Length of buffer
+ * @ret len		Length of setting data, or negative error
+ */
+static int netdev_fetch_busloc ( struct net_device *netdev, void *data,
+				 size_t len ) {
+	struct device_description *desc = &netdev->dev->desc;
+	uint32_t busloc;
+
+	busloc = cpu_to_be32 ( desc->location );
+	if ( len > sizeof ( busloc ) )
+		len = sizeof ( busloc );
+	memcpy ( data, &busloc, len );
+	return sizeof ( busloc );
 }
 
 /**
@@ -163,6 +222,8 @@ struct netdev_setting_operation {
 static struct netdev_setting_operation netdev_setting_operations[] = {
 	{ &mac_setting, netdev_store_mac, netdev_fetch_mac },
 	{ &machyp_setting, netdev_store_mac, netdev_fetch_mac },
+	{ &bustype_setting, NULL, netdev_fetch_bustype },
+	{ &busloc_setting, NULL, netdev_fetch_busloc },
 	{ &busid_setting, NULL, netdev_fetch_busid },
 	{ &chip_setting, NULL, netdev_fetch_chip },
 };
@@ -240,4 +301,52 @@ struct settings_operations netdev_settings_operations = {
 	.store = netdev_store,
 	.fetch = netdev_fetch,
 	.clear = netdev_clear,
+};
+
+/**
+ * Redirect "netX" settings block
+ *
+ * @v settings		Settings block
+ * @ret settings	Underlying settings block
+ */
+static struct settings * netdev_redirect ( struct settings *settings ) {
+	struct net_device *netdev;
+
+	/* Redirect to most recently opened network device */
+	netdev = last_opened_netdev();
+	if ( netdev ) {
+		return netdev_settings ( netdev );
+	} else {
+		return settings;
+	}
+}
+
+/** "netX" settings operations */
+static struct settings_operations netdev_redirect_settings_operations = {
+	.redirect = netdev_redirect,
+};
+
+/** "netX" settings */
+static struct settings netdev_redirect_settings = {
+	.refcnt = NULL,
+	.siblings = LIST_HEAD_INIT ( netdev_redirect_settings.siblings ),
+	.children = LIST_HEAD_INIT ( netdev_redirect_settings.children ),
+	.op = &netdev_redirect_settings_operations,
+};
+
+/** Initialise "netX" settings */
+static void netdev_redirect_settings_init ( void ) {
+	int rc;
+
+	if ( ( rc = register_settings ( &netdev_redirect_settings, NULL,
+					"netX" ) ) != 0 ) {
+		DBG ( "Could not register netX settings: %s\n",
+		      strerror ( rc ) );
+		return;
+	}
+}
+
+/** "netX" settings initialiser */
+struct init_fn netdev_redirect_settings_init_fn __init_fn ( INIT_LATE ) = {
+	.initialise = netdev_redirect_settings_init,
 };

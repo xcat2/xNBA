@@ -63,6 +63,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_test		       ( ERRFILE_CORE | 0x00170000 )
 #define ERRFILE_xferbuf		       ( ERRFILE_CORE | 0x00180000 )
 #define ERRFILE_pending		       ( ERRFILE_CORE | 0x00190000 )
+#define ERRFILE_null_reboot	       ( ERRFILE_CORE | 0x001a0000 )
 
 #define ERRFILE_eisa		     ( ERRFILE_DRIVER | 0x00000000 )
 #define ERRFILE_isa		     ( ERRFILE_DRIVER | 0x00010000 )
@@ -113,8 +114,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_sundance	     ( ERRFILE_DRIVER | 0x00410000 )
 #define ERRFILE_tlan		     ( ERRFILE_DRIVER | 0x00420000 )
 #define ERRFILE_tulip		     ( ERRFILE_DRIVER | 0x00430000 )
-#define ERRFILE_via_rhine	     ( ERRFILE_DRIVER | 0x00440000 )
-#define ERRFILE_via_velocity	     ( ERRFILE_DRIVER | 0x00450000 )
+#define ERRFILE_rhine		     ( ERRFILE_DRIVER | 0x00440000 )
+#define ERRFILE_velocity	     ( ERRFILE_DRIVER | 0x00450000 )
 #define ERRFILE_w89c840		     ( ERRFILE_DRIVER | 0x00460000 )
 #define ERRFILE_ipoib		     ( ERRFILE_DRIVER | 0x00470000 )
 #define ERRFILE_e1000_main	     ( ERRFILE_DRIVER | 0x00480000 )
@@ -207,6 +208,12 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_fcoe			( ERRFILE_NET | 0x002e0000 )
 #define ERRFILE_fcns			( ERRFILE_NET | 0x002f0000 )
 #define ERRFILE_vlan			( ERRFILE_NET | 0x00300000 )
+#define ERRFILE_oncrpc			( ERRFILE_NET | 0x00310000 )
+#define ERRFILE_portmap			( ERRFILE_NET | 0x00320000 )
+#define ERRFILE_nfs			( ERRFILE_NET | 0x00330000 )
+#define ERRFILE_nfs_open		( ERRFILE_NET | 0x00340000 )
+#define ERRFILE_mount			( ERRFILE_NET | 0x00350000 )
+#define ERRFILE_oncrpc_iob		( ERRFILE_NET | 0x00360000 )
 
 #define ERRFILE_image		      ( ERRFILE_IMAGE | 0x00000000 )
 #define ERRFILE_elf		      ( ERRFILE_IMAGE | 0x00010000 )
@@ -275,6 +282,10 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_efi_init	      ( ERRFILE_OTHER | 0x00390000 )
 #define ERRFILE_efi_timer	      ( ERRFILE_OTHER | 0x003a0000 )
 #define ERRFILE_efi_umalloc	      ( ERRFILE_OTHER | 0x003b0000 )
+#define ERRFILE_linux_pci	      ( ERRFILE_OTHER | 0x003c0000 )
+#define ERRFILE_pci_settings	      ( ERRFILE_OTHER | 0x003d0000 )
+#define ERRFILE_efi_reboot	      ( ERRFILE_OTHER | 0x003e0000 )
+#define ERRFILE_memmap_settings	      ( ERRFILE_OTHER | 0x003f0000 )
 
 /** @} */
 
