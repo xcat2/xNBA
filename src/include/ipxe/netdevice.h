@@ -44,7 +44,7 @@ struct device;
 #define MAX_LL_HEADER_LEN 36
 
 /** Maximum length of a network-layer address */
-#define MAX_NET_ADDR_LEN 4
+#define MAX_NET_ADDR_LEN 16
 
 /** Maximum length of a network-layer header
  *
@@ -175,8 +175,17 @@ struct ll_protocol {
 	 *
 	 * @v ll_addr		Link-layer address
 	 * @v eth_addr		Ethernet-compatible address to fill in
+	 * @ret rc		Return status code
 	 */
 	int ( * eth_addr ) ( const void *ll_addr, void *eth_addr );
+	/**
+	 * Generate EUI-64 address
+	 *
+	 * @v ll_addr		Link-layer address
+	 * @v eui64		EUI-64 address to fill in
+	 * @ret rc		Return status code
+	 */
+	int ( * eui64 ) ( const void *ll_addr, void *eui64 );
 	/** Link-layer protocol
 	 *
 	 * This is an ARPHRD_XXX constant, in network byte order.
@@ -300,6 +309,8 @@ struct net_device {
 	struct list_head list;
 	/** List of open network devices */
 	struct list_head open_list;
+	/** Index of this network device */
+	unsigned int index;
 	/** Name of this network device */
 	char name[12];
 	/** Underlying hardware device */

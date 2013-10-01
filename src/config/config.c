@@ -101,6 +101,9 @@ REQUIRE_OBJECT ( debugcon );
 #ifdef NET_PROTO_IPV4
 REQUIRE_OBJECT ( ipv4 );
 #endif
+#ifdef NET_PROTO_IPV6
+REQUIRE_OBJECT ( ipv6 );
+#endif
 
 /*
  * Drag in all requested PXE support
@@ -265,6 +268,9 @@ REQUIRE_OBJECT ( pci_cmd );
 #endif
 #ifdef PARAM_CMD
 REQUIRE_OBJECT ( param_cmd );
+#endif
+#ifdef NEIGHBOUR_CMD
+REQUIRE_OBJECT ( neighbour_cmd );
 #endif
 
 /*

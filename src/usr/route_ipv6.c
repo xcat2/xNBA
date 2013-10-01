@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 Michael Brown <mbrown@fensystems.co.uk>.
+ * Copyright (C) 2013 Michael Brown <mbrown@fensystems.co.uk>.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -19,26 +19,40 @@
 
 FILE_LICENCE ( GPL2_OR_LATER );
 
+#include <stdio.h>
 #include <ipxe/netdevice.h>
+#include <ipxe/ipv6.h>
 #include <usr/route.h>
 
 /** @file
  *
- * Routing management
+ * IPv6 routing management
  *
  */
 
 /**
- * Print routing table
+ * Print IPv6 routing table
  *
+ * @v netdev		Network device
  */
-void route ( void ) {
-	struct net_device *netdev;
-	struct routing_family *family;
+static void route_ipv6_print ( struct net_device *netdev ) {
+	struct ipv6_miniroute *miniroute;
 
-	for_each_netdev ( netdev ) {
-		for_each_table_entry ( family, ROUTING_FAMILIES ) {
-			family->print ( netdev );
-		}
+	list_for_each_entry ( miniroute, &ipv6_miniroutes, list ) {
+		if ( miniroute->netdev != netdev )
+			continue;
+		printf ( "%s: %s/%d", netdev->name,
+			 inet6_ntoa ( &miniroute->address ),
+			 miniroute->prefix_len );
+		if ( miniroute->has_router )
+			printf ( " gw %s", inet6_ntoa ( &miniroute->router ) );
+		if ( ! netdev_is_open ( miniroute->netdev ) )
+			printf ( " (inaccessible)" );
+		printf ( "\n" );
 	}
 }
+
+/** IPv6 routing family */
+struct routing_family ipv6_routing_family __routing_family ( ROUTING_IPV6 ) = {
+	.print = route_ipv6_print,
+};
