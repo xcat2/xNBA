@@ -2427,6 +2427,37 @@ static struct interface_descriptor tls_cipherstream_desc =
  ******************************************************************************
  */
 
+static int dns_wildcard_matcher( const char* dns, const char* wildcard ) {
+	if ( strchr ( wildcard, '*' ) == NULL ) {
+		/* No wildcard, just strcmp */
+		return strcmp ( dns, wildcard );
+	}
+	if ( strrchr(wildcard, '*') != wildcard ) {
+		/* This is multiple-wildcard. We can't handle that, so bail. */
+		return -1;
+	}
+	const char* first_dot = strchr (dns, '.') ;
+	return strcmp ( first_dot, wildcard + 1 );
+}
+
+static int tls_validator_name( struct tls_session *tls, struct x509_certificate *cert ) {
+	/* Verify server name */
+	if ( ( cert->subject.name == NULL ) && ( !cert->extensions.subject_alt_name.present ) ) {
+		return -1;
+	}
+	struct x509_san_link* link;
+	list_for_each_entry ( link, &cert->extensions.subject_alt_name.names, list ) {
+		/* If the name matches, return 0, otherwise, continue */
+		if ( dns_wildcard_matcher ( tls->name, link->name ) == 0) {
+			return 0;
+		}
+	}
+	if ( !cert->extensions.subject_alt_name.present ) {
+		return dns_wildcard_matcher ( tls->name, cert->subject.name );
+	}
+	return -1;
+}
+
 /**
  * Handle certificate validation completion
  *
@@ -2444,7 +2475,7 @@ static void tls_validator_done ( struct tls_session *tls, int rc ) {
 	/* Check for validation failure */
 	if ( rc != 0 ) {
 		DBGC ( tls, "TLS %p certificate validation failed: %s\n",
-		       tls, strerror ( rc ) );
+			     tls, strerror ( rc ) );
 		goto err;
 	}
 	DBGC ( tls, "TLS %p certificate validation succeeded\n", tls );
@@ -2454,8 +2485,7 @@ static void tls_validator_done ( struct tls_session *tls, int rc ) {
 	assert ( cert != NULL );
 
 	/* Verify server name */
-	if ( ( cert->subject.name == NULL ) ||
-	     ( strcmp ( cert->subject.name, tls->name ) != 0 ) ) {
+	if ( tls_validator_name( tls, cert ) ) {
 		DBGC ( tls, "TLS %p server name incorrect (expected %s, got "
 		       "%s)\n", tls, tls->name, cert->subject.name );
 		rc = -EACCES_WRONG_NAME;
