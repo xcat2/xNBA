@@ -58,6 +58,7 @@ typedef uint8_t entropy_sample_t;
 
 /* Include all architecture-dependent entropy API headers */
 #include <bits/entropy.h>
+#include <ipxe/efi/efi_entropy.h>
 
 /**
  * Enable entropy gathering
