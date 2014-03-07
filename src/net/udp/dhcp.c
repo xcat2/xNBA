@@ -185,8 +185,8 @@ struct dhcp_session_state {
 	void ( * expired ) ( struct dhcp_session *dhcp );
 	/** Transmitted message type */
 	uint8_t tx_msgtype;
-    uint8_t min_timeout;
-    uint8_t max_timeout;
+    unsigned long min_timeout;
+    unsigned long max_timeout;
 };
 
 static struct dhcp_session_state dhcp_state_discover;
