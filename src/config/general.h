@@ -111,12 +111,12 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #undef	AUTOBOOT_CMD		/* Automatic booting */
 #define	NVO_CMD			/* Non-volatile option storage commands */
 #undef	CONFIG_CMD		/* Option configuration console */
-#undef	IFMGMT_CMD		/* Interface management commands */
+#define	IFMGMT_CMD		/* Interface management commands */
 #undef	IWMGMT_CMD		/* Wireless interface management commands */
 #undef FCMGMT_CMD		/* Fibre Channel management commands */
-#undef	ROUTE_CMD		/* Routing table management commands */
+#define	ROUTE_CMD		/* Routing table management commands */
 #define IMAGE_CMD		/* Image management commands */
-#undef DHCP_CMD		/* DHCP management commands */
+#define DHCP_CMD		/* DHCP management commands */
 #define SANBOOT_CMD		/* SAN boot commands */
 #undef MENU_CMD		/* Menu commands */
 #undef LOGIN_CMD		/* Login command */
@@ -125,7 +125,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #undef	LOTEST_CMD		/* Loopback testing commands */
 #undef	VLAN_CMD		/* VLAN commands */
 #undef	PXE_CMD			/* PXE commands */
-#undef	REBOOT_CMD		/* Reboot command */
+#define	REBOOT_CMD		/* Reboot command */
 #define IMAGE_TRUST_CMD	/* Image trust management commands */
 #undef  SYNC_CMD		/* Sync command */
 #undef  NSLOOKUP_CMD		/* DNS resolving command */

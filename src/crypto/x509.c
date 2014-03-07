@@ -1310,16 +1310,16 @@ int x509_validate ( struct x509_certificate *cert,
 	if ( cert->valid )
 		return 0;
 
-	/* Fail if certificate is invalid at specified time */
-	if ( ( rc = x509_check_time ( cert, time ) ) != 0 )
-		return rc;
-
 	/* Succeed if certificate is a trusted root certificate */
 	if ( x509_check_root ( cert, root ) == 0 ) {
 		cert->valid = 1;
 		cert->path_remaining = ( cert->extensions.basic.path_len + 1 );
 		return 0;
 	}
+
+	/* Fail if certificate is invalid at specified time */
+	if ( ( rc = x509_check_time ( cert, time ) ) != 0 )
+		return rc;
 
 	/* Fail unless we have an issuer */
 	if ( ! issuer ) {
