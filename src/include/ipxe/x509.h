@@ -86,6 +86,21 @@ struct x509_basic_constraints {
 	unsigned int path_len;
 };
 
+/** A link in an X.509 certificate chain */
+struct x509_san_link {
+	/** List of links */
+	struct list_head list;
+	/** name */
+	char* name;
+};
+
+struct x509_subject_alt_name {
+	/** Subject Alternative Name extension is present */
+	int present;
+	/** General Name **/
+	struct list_head names;
+};
+
 /** Unlimited path length
  *
  * We use -2U, since this quantity represents one *fewer* than the
@@ -150,6 +165,8 @@ struct x509_extensions {
 	struct x509_basic_constraints basic;
 	/** Key usage */
 	struct x509_key_usage usage;
+	/** Subject Alternative Name */
+	struct x509_subject_alt_name subject_alt_name;
 	/** Extended key usage */
 	struct x509_extended_key_usage ext_usage;
 	/** Authority information access */

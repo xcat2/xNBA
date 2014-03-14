@@ -872,7 +872,14 @@ int ocsp_validate ( struct ocsp_check *ocsp, time_t time ) {
 
 	/* Sanity checks */
 	assert ( response->data != NULL );
-	assert ( signer != NULL );
+        /* If the signer is NULL, then we did not receive any
+         * supplementary certificates. Assume it's the issuer, and
+         * move on with life. If it doesn't validate, then the OCSP
+         * response is invalid anyway.
+         */
+        if ( signer == NULL ) {
+		signer = ocsp->issuer;
+        }
 
 	/* Validate signer, if applicable.  If the signer is not the
 	 * issuer, then it must be signed directly by the issuer.
