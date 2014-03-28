@@ -185,12 +185,12 @@ static int efi_image_exec ( struct image *image ) {
 		goto err_file_install;
 	}
 
-	/* Install iPXE download protocol */
+	/* Install iPXE download protocol
 	if ( ( rc = efi_download_install ( &nethandle ) ) != 0 ) {
 		DBGC ( image, "EFIIMAGE %p could not install iPXE download "
 		       "protocol: %s\n", image, strerror ( rc ) );
 		goto err_download_install;
-	}
+	} */
 
 	/* Create device path for image */
 	path = efi_image_path ( image, netpath );
@@ -271,8 +271,9 @@ static int efi_image_exec ( struct image *image ) {
 	free ( path );
  err_image_path:
 	efi_download_uninstall ( nethandle );
- err_download_install:
+/* err_download_install:
 	efi_file_uninstall ( nethandle );
+*/
  err_file_install:
  err_no_snpdev:
 	return rc;
