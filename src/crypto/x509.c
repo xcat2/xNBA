@@ -20,7 +20,6 @@
 FILE_LICENCE ( GPL2_OR_LATER );
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
@@ -534,7 +533,6 @@ static int x509_parse_subject_alt_name ( struct x509_certificate *cert,
 	struct asn1_cursor cursor;
 	struct asn1_cursor string_cursor;
 	int rc;
-	unsigned int type;
 
 	INIT_LIST_HEAD ( &subject_alt_name->names );
 
@@ -550,9 +548,7 @@ static int x509_parse_subject_alt_name ( struct x509_certificate *cert,
 		/* Mark extension as present */
 		subject_alt_name->present = 1;
 		memcpy ( &string_cursor, &cursor, sizeof ( string_cursor ) );
-		type = asn1_type( &string_cursor );
-		rc = asn1_enter_any ( &string_cursor );
-		if ( type == 0x82) {
+		if ( ( rc = asn1_enter ( &string_cursor, ASN1_IMPLICIT_TAG ( 2 ) ) ) == 0 ) {
 			char* name = zalloc ( string_cursor.len + 1 );
 			memcpy ( name, string_cursor.data, string_cursor.len );
 			if ( strlen ( name ) != string_cursor.len ) {
@@ -564,19 +560,6 @@ static int x509_parse_subject_alt_name ( struct x509_certificate *cert,
 			struct x509_san_link* link = zalloc ( sizeof ( struct x509_san_link ) );
 			link->name = name;
 			list_add ( &link->list, &subject_alt_name->names );
-		} else if ( type == 0x87 ) {
-			if ( string_cursor.len == 4 ) { // TODO: IPv6
-				char* name = zalloc ( 16 );  // max ipv4 string length
-				snprintf( name, 16, "%d.%d.%d.%d",
-				    ((unsigned char*)string_cursor.data)[0],
-				    ((unsigned char*)string_cursor.data)[1],
-				    ((unsigned char*)string_cursor.data)[2],
-				    ((unsigned char*)string_cursor.data)[3] );
-				//DBGC ( cert, "X509 %p subjectAltName %s\n", cert, name );
-				struct x509_san_link* link = zalloc ( sizeof ( struct x509_san_link ) );
-				link->name = name;
-				list_add ( &link->list, &subject_alt_name->names );
-			}
 		}
 		asn1_skip_any ( &cursor );
 	}
