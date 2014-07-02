@@ -170,11 +170,6 @@ struct asn1_builder_header {
 	ASN1_OID_INITIAL ( 2, 5 ), ASN1_OID_SINGLE ( 29 ),	\
 	ASN1_OID_SINGLE ( 15 )
 
-/** ASN1. OID for id-ce-subjectAltname (2.5.29.17) */
-#define ASN1_OID_SUBJECTALTNAME					\
-	ASN1_OID_INITIAL ( 2, 5 ), ASN1_OID_SINGLE ( 29 ),	\
-	ASN1_OID_SINGLE ( 17 )
-
 /** ASN.1 OID for id-ce-basicConstraints (2.5.29.19) */
 #define ASN1_OID_BASICCONSTRAINTS				\
 	ASN1_OID_INITIAL ( 2, 5 ), ASN1_OID_SINGLE ( 29 ),	\

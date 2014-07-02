@@ -520,53 +520,6 @@ static int x509_parse_key_usage ( struct x509_certificate *cert,
 	return 0;
 }
 
-/**
- * Parse X.509 certificate subject alternative name
- *
- * @v cert		X.509 certificate
- * @v raw		ASN.1 cursor
- * @ret rc		Return status code
- */
-static int x509_parse_subject_alt_name ( struct x509_certificate *cert,
-					 const struct asn1_cursor *raw ) {
-	struct x509_subject_alt_name *subject_alt_name = &cert->extensions.subject_alt_name;
-	struct asn1_cursor cursor;
-	struct asn1_cursor string_cursor;
-	int rc;
-
-	INIT_LIST_HEAD ( &subject_alt_name->names );
-
-	DBGC ( cert, "X509 %p parsing subjectAltName\n", cert );
-
-	/* Enter GeneralNames */
-	memcpy ( &cursor, raw, sizeof ( cursor ) );
-	asn1_enter ( &cursor, ASN1_SEQUENCE );
-	DBGC_HDA ( cert, 0, cursor.data, 128 );
-
-	/* Parse each name in turn */
-	while ( cursor.len ) {
-		/* Mark extension as present */
-		subject_alt_name->present = 1;
-		memcpy ( &string_cursor, &cursor, sizeof ( string_cursor ) );
-		if ( ( rc = asn1_enter ( &string_cursor, ASN1_IMPLICIT_TAG ( 2 ) ) ) == 0 ) {
-			char* name = zalloc ( string_cursor.len + 1 );
-			memcpy ( name, string_cursor.data, string_cursor.len );
-			if ( strlen ( name ) != string_cursor.len ) {
-				DBGC ( cert, "X509 %p contains malicious subjectAltName\n",
- 				       cert );
-				return rc;
-			}
-			//DBGC ( cert, "X509 %p subjectAltName %s\n", cert, name );
-			struct x509_san_link* link = zalloc ( sizeof ( struct x509_san_link ) );
-			link->name = name;
-			list_add ( &link->list, &subject_alt_name->names );
-		}
-		asn1_skip_any ( &cursor );
-	}
-
-	return 0;
-}
-
 /** "id-kp-codeSigning" object identifier */
 static uint8_t oid_code_signing[] = { ASN1_OID_CODESIGNING };
 
@@ -785,10 +738,6 @@ static uint8_t oid_ce_basic_constraints[] =
 static uint8_t oid_ce_key_usage[] =
 	{ ASN1_OID_KEYUSAGE };
 
-/** "id-ce-keyUsage" object identifier */
-static uint8_t oid_ce_subject_alt_name[] =
-	{ ASN1_OID_SUBJECTALTNAME };
-
 /** "id-ce-extKeyUsage" object identifier */
 static uint8_t oid_ce_ext_key_usage[] =
 	{ ASN1_OID_EXTKEYUSAGE };
@@ -808,11 +757,6 @@ static struct x509_extension x509_extensions[] = {
 		.name = "keyUsage",
 		.oid = ASN1_OID_CURSOR ( oid_ce_key_usage ),
 		.parse = x509_parse_key_usage,
-	},
-	{
-		.name = "subjectAltName",
-		.oid = ASN1_OID_CURSOR ( oid_ce_subject_alt_name ),
-		.parse = x509_parse_subject_alt_name,
 	},
 	{
 		.name = "extKeyUsage",
