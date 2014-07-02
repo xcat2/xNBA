@@ -49,7 +49,6 @@ struct console_driver syslogs_console __console_driver;
 
 /** The encrypted syslog server */
 static struct sockaddr_tcpip logserver = {
-	.st_family = AF_INET,
 	.st_port = htons ( SYSLOG_PORT ),
 };
 
@@ -113,10 +112,12 @@ static unsigned int syslogs_severity = SYSLOG_DEFAULT_SEVERITY;
 /**
  * Handle ANSI set encrypted syslog priority (private sequence)
  *
+ * @v ctx		ANSI escape sequence context
  * @v count		Parameter count
  * @v params		List of graphic rendition aspects
  */
-static void syslogs_handle_priority ( unsigned int count __unused,
+static void syslogs_handle_priority ( struct ansiesc_context *ctx __unused,
+				      unsigned int count __unused,
 				      int params[] ) {
 	if ( params[0] >= 0 ) {
 		syslogs_severity = params[0];
@@ -176,7 +177,7 @@ static void syslogs_putchar ( int character ) {
 /** Encrypted syslog console driver */
 struct console_driver syslogs_console __console_driver = {
 	.putchar = syslogs_putchar,
-	.disabled = 1,
+	.disabled = CONSOLE_DISABLED,
 	.usage = CONSOLE_SYSLOGS,
 };
 
@@ -188,7 +189,7 @@ struct console_driver syslogs_console __console_driver = {
  */
 
 /** Encrypted syslog server setting */
-struct setting syslogs_setting __setting ( SETTING_MISC ) = {
+const struct setting syslogs_setting __setting ( SETTING_MISC, syslogs ) = {
 	.name = "syslogs",
 	.description = "Encrypted syslog server",
 	.tag = DHCP_EB_SYSLOGS_SERVER,
@@ -204,15 +205,10 @@ static int apply_syslogs_settings ( void ) {
 	static char *old_server;
 	char *server;
 	struct interface *socket;
-	int len;
 	int rc;
 
 	/* Fetch log server */
-	len = fetch_string_setting_copy ( NULL, &syslogs_setting, &server );
-	if ( len < 0 ) {
-		rc = len;
-		goto err_fetch_server;
-	}
+	fetch_string_setting_copy ( NULL, &syslogs_setting, &server );
 
 	/* Do nothing unless log server has changed */
 	if ( ( ( server == NULL ) && ( old_server == NULL ) ) ||
@@ -225,7 +221,7 @@ static int apply_syslogs_settings ( void ) {
 	old_server = NULL;
 
 	/* Reset encrypted syslog connection */
-	syslogs_console.disabled = 1;
+	syslogs_console.disabled = CONSOLE_DISABLED;
 	intf_restart ( &syslogs, 0 );
 
 	/* Do nothing unless we have a log server */
@@ -264,7 +260,6 @@ static int apply_syslogs_settings ( void ) {
  out_no_server:
  out_no_change:
 	free ( server );
- err_fetch_server:
 	return rc;
 }
 

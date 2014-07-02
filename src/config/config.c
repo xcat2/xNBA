@@ -93,6 +93,9 @@ REQUIRE_OBJECT ( vmconsole );
 #ifdef CONSOLE_DEBUGCON
 REQUIRE_OBJECT ( debugcon );
 #endif
+#ifdef CONSOLE_VESAFB
+REQUIRE_OBJECT ( vesafb );
+#endif
 
 /*
  * Drag in all requested network protocols
@@ -194,6 +197,12 @@ REQUIRE_OBJECT ( efi_image );
 #ifdef IMAGE_SDI
 REQUIRE_OBJECT ( sdi );
 #endif
+#ifdef IMAGE_PNM
+REQUIRE_OBJECT ( pnm );
+#endif
+#ifdef IMAGE_PNG
+REQUIRE_OBJECT ( png );
+#endif
 
 /*
  * Drag in all requested commands
@@ -271,6 +280,18 @@ REQUIRE_OBJECT ( param_cmd );
 #endif
 #ifdef NEIGHBOUR_CMD
 REQUIRE_OBJECT ( neighbour_cmd );
+#endif
+#ifdef PING_CMD
+REQUIRE_OBJECT ( ping_cmd );
+#endif
+#ifdef CONSOLE_CMD
+REQUIRE_OBJECT ( console_cmd );
+#endif
+#ifdef IPSTAT_CMD
+REQUIRE_OBJECT ( ipstat_cmd );
+#endif
+#ifdef PROFSTAT_CMD
+REQUIRE_OBJECT ( profstat_cmd );
 #endif
 
 /*

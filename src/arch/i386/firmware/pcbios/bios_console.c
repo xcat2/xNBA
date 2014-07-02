@@ -62,11 +62,13 @@ static unsigned int bios_attr = ATTR_DEFAULT;
 /**
  * Handle ANSI CUP (cursor position)
  *
+ * @v ctx		ANSI escape sequence context
  * @v count		Parameter count
  * @v params[0]		Row (1 is top)
  * @v params[1]		Column (1 is left)
  */
-static void bios_handle_cup ( unsigned int count __unused, int params[] ) {
+static void bios_handle_cup ( struct ansiesc_context *ctx __unused,
+			      unsigned int count __unused, int params[] ) {
 	int cx = ( params[1] - 1 );
 	int cy = ( params[0] - 1 );
 
@@ -85,10 +87,12 @@ static void bios_handle_cup ( unsigned int count __unused, int params[] ) {
 /**
  * Handle ANSI ED (erase in page)
  *
+ * @v ctx		ANSI escape sequence context
  * @v count		Parameter count
  * @v params[0]		Region to erase
  */
-static void bios_handle_ed ( unsigned int count __unused,
+static void bios_handle_ed ( struct ansiesc_context *ctx __unused,
+			     unsigned int count __unused,
 			     int params[] __unused ) {
 	/* We assume that we always clear the whole screen */
 	assert ( params[0] == ANSIESC_ED_ALL );
@@ -97,16 +101,20 @@ static void bios_handle_ed ( unsigned int count __unused,
 					   "int $0x10\n\t"
 					   "cli\n\t" )
 			       : : "a" ( 0x0600 ), "b" ( bios_attr << 8 ),
-			           "c" ( 0 ), "d" ( 0xfefe ) );
+				   "c" ( 0 ),
+				   "d" ( ( ( console_height - 1 ) << 8 ) |
+					 ( console_width - 1 ) ) );
 }
 
 /**
  * Handle ANSI SGR (set graphics rendition)
  *
+ * @v ctx		ANSI escape sequence context
  * @v count		Parameter count
  * @v params		List of graphic rendition aspects
  */
-static void bios_handle_sgr ( unsigned int count, int params[] ) {
+static void bios_handle_sgr ( struct ansiesc_context *ctx __unused,
+			      unsigned int count, int params[] ) {
 	static const uint8_t bios_attr_fcols[10] = {
 		ATTR_FCOL_BLACK, ATTR_FCOL_RED, ATTR_FCOL_GREEN,
 		ATTR_FCOL_YELLOW, ATTR_FCOL_BLUE, ATTR_FCOL_MAGENTA,

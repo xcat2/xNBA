@@ -116,6 +116,23 @@ struct smbios_system_information {
 /** SMBIOS system information structure type */
 #define SMBIOS_TYPE_SYSTEM_INFORMATION 1
 
+/** SMBIOS base board information structure */
+struct smbios_base_board_information {
+	/** SMBIOS structure header */
+	struct smbios_header header;
+	/** Manufacturer string */
+	uint8_t manufacturer;
+	/** Product string */
+	uint8_t product;
+	/** Version string */
+	uint8_t version;
+	/** Serial number string */
+	uint8_t serial;
+} __attribute__ (( packed ));
+
+/** SMBIOS base board information structure type */
+#define SMBIOS_TYPE_BASE_BOARD_INFORMATION 2
+
 /** SMBIOS enclosure information structure */
 struct smbios_enclosure_information {
 	/** SMBIOS structure header */
@@ -162,6 +179,8 @@ struct smbios {
 #define SMBIOS_VERSION( major, minor ) ( ( (major) << 8 ) | (minor) )
 
 extern int find_smbios ( struct smbios *smbios );
+extern int find_smbios_entry ( userptr_t start, size_t len,
+			       struct smbios_entry *entry );
 extern int find_smbios_structure ( unsigned int type, unsigned int instance,
 				   struct smbios_structure *structure );
 extern int read_smbios_structure ( struct smbios_structure *structure,

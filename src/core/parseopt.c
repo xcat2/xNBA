@@ -30,6 +30,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/menu.h>
 #include <ipxe/settings.h>
 #include <ipxe/params.h>
+#include <ipxe/timer.h>
 #include <ipxe/parseopt.h>
 
 /** @file
@@ -96,6 +97,27 @@ int parse_integer ( char *text, unsigned int *value ) {
 }
 
 /**
+ * Parse timeout value (in ms)
+ *
+ * @v text		Text
+ * @ret value		Integer value
+ * @ret rc		Return status code
+ */
+int parse_timeout ( char *text, unsigned long *value ) {
+	unsigned int value_ms;
+	int rc;
+
+	/* Parse raw integer value */
+	if ( ( rc = parse_integer ( text, &value_ms ) ) != 0 )
+		return rc;
+
+	/* Convert to a number of timer ticks */
+	*value = ( ( value_ms * TICKS_PER_SEC ) / 1000 );
+
+	return 0;
+}
+
+/**
  * Parse network device name
  *
  * @v text		Text
@@ -112,6 +134,29 @@ int parse_netdev ( char *text, struct net_device **netdev ) {
 	if ( ! *netdev ) {
 		printf ( "\"%s\": no such network device\n", text );
 		return -ENODEV;
+	}
+
+	return 0;
+}
+
+/**
+ * Parse network device configurator name
+ *
+ * @v text		Text
+ * @ret configurator	Network device configurator
+ * @ret rc		Return status code
+ */
+int parse_netdev_configurator ( char *text,
+				struct net_device_configurator **configurator ){
+
+	/* Sanity check */
+	assert ( text != NULL );
+
+	/* Find network device configurator */
+	*configurator = find_netdev_configurator ( text );
+	if ( ! *configurator ) {
+		printf ( "\"%s\": no such configurator\n", text );
+		return -ENOTSUP;
 	}
 
 	return 0;
@@ -281,8 +326,25 @@ int parse_parameters ( char *text, struct parameters **params ) {
  * @v argv		Argument list
  */
 void print_usage ( struct command_descriptor *cmd, char **argv ) {
-	printf ( "Usage:\n\n  %s %s\n\nSee http://ipxe.org/cmd/%s for further "
-		 "information\n", argv[0], cmd->usage, argv[0] );
+	struct option_descriptor *option;
+	unsigned int i;
+	int is_optional;
+
+	printf ( "Usage:\n\n  %s", argv[0] );
+	for ( i = 0 ; i < cmd->num_options ; i++ ) {
+		option = &cmd->options[i];
+		printf ( " [-%c|--%s", option->shortopt, option->longopt );
+		if ( option->has_arg ) {
+			is_optional = ( option->has_arg == optional_argument );
+			printf ( " %s<%s>%s", ( is_optional ? "[" : "" ),
+				 option->longopt, ( is_optional ? "]" : "" ) );
+		}
+		printf ( "]" );
+	}
+	if ( cmd->usage )
+		printf ( " %s", cmd->usage );
+	printf ( "\n\nSee http://ipxe.org/cmd/%s for further information\n",
+		 argv[0] );
 }
 
 /**

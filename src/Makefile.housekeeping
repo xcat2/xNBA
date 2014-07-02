@@ -146,13 +146,6 @@ define NEWLINE
 
 endef
 
-# Check for an old version of gas (binutils 2.9.1)
-#
-OLDGAS	:= $(shell $(AS) --version | grep -q '2\.9\.1' && $(ECHO) -DGAS291)
-WORKAROUND_CFLAGS += $(OLDGAS)
-oldgas :
-	@$(ECHO) $(oldgas)
-
 # Some widespread patched versions of gcc include -fstack-protector by
 # default, even when -ffreestanding is specified.  We therefore need
 # to disable -fstack-protector if the compiler supports it.
@@ -500,6 +493,11 @@ CFLAGS		+= $(FS_FLAGS) $(DS_FLAGS)
 endif
 LDFLAGS		+= --gc-sections
 
+# Force creation of static binaries (required for OpenBSD, does no
+# harm on other platforms).
+#
+LDFLAGS		+= -static
+
 # compiler.h is needed for our linking and debugging system
 #
 CFLAGS		+= -include include/compiler.h
@@ -535,14 +533,14 @@ endif
 #
 COMPILE_c	= $(CC) $(CFLAGS) $(CFLAGS_c) $(OBJ_CFLAGS)
 RULE_c		= $(Q)$(COMPILE_c) -c $< -o $@ $(POST_O)
-RULE_c_to_dbg%.o = $(Q)$(COMPILE_c) -Ddebug_$(subst -,_,$(OBJECT))=$* -c $< -o $@ $(POST_O)
+RULE_c_to_dbg%.o = $(Q)$(COMPILE_c) -DDBGLVL_MAX=$* -c $< -o $@ $(POST_O)
 RULE_c_to_c	= $(Q)$(COMPILE_c) -E -c $< > $@
 RULE_c_to_s	= $(Q)$(COMPILE_c) -S -g0 -c $< -o $@
 
 PREPROCESS_S	= $(CPP) $(CFLAGS) $(CFLAGS_S) $(OBJ_CFLAGS)
 ASSEMBLE_S	= $(AS) $(ASFLAGS)
 RULE_S		= $(Q)$(PREPROCESS_S) $< | $(ASSEMBLE_S) -o $@
-RULE_S_to_dbg%.o = $(Q)$(PREPROCESS_S) -Ddebug_$(subst -,_,$(OBJECT))=$* $< | $(ASSEMBLE_S) -o $@
+RULE_S_to_dbg%.o = $(Q)$(PREPROCESS_S) -DDBGLVL_MAX=$* $< | $(ASSEMBLE_S) -o $@
 RULE_S_to_s	= $(Q)$(PREPROCESS_S) $< > $@
 
 DEBUG_TARGETS	+= dbg%.o c s
@@ -562,7 +560,7 @@ ifneq ($(EMBED_OLD),$(EMBED))
 $(shell $(ECHO) "$(EMBED)" > $(EMBEDDED_LIST))
 endif
 
-$(EMBEDDED_LIST) :
+$(EMBEDDED_LIST) : $(MAKEDEPS)
 
 VERYCLEANUP	+= $(EMBEDDED_LIST)
 
@@ -587,7 +585,7 @@ ifneq ($(TRUST_OLD),$(TRUST))
 $(shell $(ECHO) "$(TRUST)" > $(TRUSTED_LIST))
 endif
 
-$(TRUSTED_LIST) :
+$(TRUSTED_LIST) : $(MAKEDEPS)
 
 VERYCLEANUP	+= $(TRUSTED_LIST)
 
@@ -603,7 +601,7 @@ rootcert_DEPS += $(TRUSTED_FILES) $(TRUSTED_LIST)
 
 CFLAGS_rootcert = $(if $(TRUSTED_FPS),-DTRUSTED="$(TRUSTED_FPS)")
 
-# (Single-element) list of client certificates
+# List of embedded certificates
 #
 CERT_LIST := $(BIN)/.certificate.list
 ifeq ($(wildcard $(CERT_LIST)),)
@@ -615,28 +613,47 @@ ifneq ($(CERT_OLD),$(CERT))
 $(shell $(ECHO) "$(CERT)" > $(CERT_LIST))
 endif
 
-$(CERT_LIST) :
+$(CERT_LIST) : $(MAKEDEPS)
 
 VERYCLEANUP += $(CERT_LIST)
 
-# Embedded client certificate
+# Embedded certificates concatenated and then split into one file per
+# certificate (even if original files contained certificate chains)
 #
-CERT_INC := $(BIN)/.certificate.der
+CERT_FILES := $(subst $(COMMA), ,$(CERT))
+CERT_CONCAT := $(BIN)/.certificates.pem
 
-ifdef CERT
-$(CERT_INC) : $(CERT) $(CERT_LIST)
+ifneq ($(CERT),)
+
+CERT_COUNT := $(shell grep "BEGIN CERTIFICATE" $(CERT_FILES) | wc -l)
+
+$(CERT_CONCAT) : $(CERT_FILES) $(CERT_LIST)
+	$(Q)cat $(CERT_FILES) > $@
+
+# We must use an (otherwise unnecessary) pattern rule here to encode
+# the fact that one "csplit" command generates multiple targets
+CERT_PEMS := $(foreach i,$(call seq,1,$(CERT_COUNT)),\
+	       $(BIN)/.certificate.pem.$(i))
+$(subst .pem.,.%.,$(CERT_PEMS)) : $(BIN)/.certificates.%
+	$(Q)$(CSPLIT) -q -n 1 -f $(BIN)/.certificate.pem. $< \
+		'/BEGIN CERTIFICATE/' '{*}'
+
+CERT_DERS := $(subst .certificate.pem.,.certificate.der.,$(CERT_PEMS))
+$(BIN)/.certificate.der.% : $(BIN)/.certificate.pem.%
 	$(Q)$(OPENSSL) x509 -in $< -outform DER -out $@
 
-clientcert_DEPS += $(CERT_INC)
+CERT_ALL := $(foreach i,$(call seq,1,$(CERT_COUNT)),\
+	      CERT ( $(i), \"$(word $(i),$(CERT_DERS))\" ))
+
 endif
 
-CLEANUP += $(CERT_INC)
+certstore_DEPS += $(CERT_LIST) $(CERT_FILES) $(CERT_PEMS) $(CERT_DERS)
 
-clientcert_DEPS += $(CERT_LIST)
+CFLAGS_certstore += -DCERT_ALL="$(CERT_ALL)"
 
-CFLAGS_clientcert += $(if $(CERT),-DCERTIFICATE="\"$(CERT_INC)\"")
+CLEANUP += $(BIN)/.certificate.* $(BIN)/.certificates.*
 
-# (Single-element) list of client private keys
+# (Single-element) list of private keys
 #
 ifdef KEY
 PRIVKEY	:= $(KEY) # Maintain backwards compatibility
@@ -651,11 +668,11 @@ ifneq ($(PRIVKEY_OLD),$(PRIVKEY))
 $(shell $(ECHO) "$(PRIVKEY)" > $(PRIVKEY_LIST))
 endif
 
-$(PRIVKEY_LIST) :
+$(PRIVKEY_LIST) : $(MAKEDEPS)
 
 VERYCLEANUP += $(PRIVKEY_LIST)
 
-# Embedded client private key
+# Embedded private key
 #
 PRIVKEY_INC := $(BIN)/.private_key.der
 
@@ -663,33 +680,47 @@ ifdef PRIVKEY
 $(PRIVKEY_INC) : $(PRIVKEY) $(PRIVKEY_LIST)
 	$(Q)$(OPENSSL) rsa -in $< -outform DER -out $@
 
-clientcert_DEPS += $(PRIVKEY_INC)
+privkey_DEPS += $(PRIVKEY_INC)
 endif
 
-CLEANUP += $(PRIVKEY_INC)
+CLEANUP += $(BIN)/.private_key.*
 
-clientcert_DEPS += $(PRIVKEY_LIST)
+privkey_DEPS += $(PRIVKEY_LIST)
 
-CFLAGS_clientcert += $(if $(PRIVKEY),-DPRIVATE_KEY="\"$(PRIVKEY_INC)\"")
+CFLAGS_privkey += $(if $(PRIVKEY),-DPRIVATE_KEY="\"$(PRIVKEY_INC)\"")
 
 # These files use .incbin inline assembly to include a binary file.
 # Unfortunately ccache does not detect this dependency and caches
 # builds even when the binary file has changed.
 #
-$(BIN)/embedded.o : override CC := env CCACHE_DISABLE=1 $(CC)
+$(BIN)/embedded.% : override CC := env CCACHE_DISABLE=1 $(CC)
+$(BIN)/certstore.% : override CC := env CCACHE_DISABLE=1 $(CC)
+$(BIN)/privkey.% : override CC := env CCACHE_DISABLE=1 $(CC)
 
-$(BIN)/clientcert.o : override CC := env CCACHE_DISABLE=1 $(CC)
-
-# Version number
+# Debug message autocolourisation range
 #
-CFLAGS_version += -DVERSION_MAJOR=$(VERSION_MAJOR) \
-		  -DVERSION_MINOR=$(VERSION_MINOR) \
-		  -DVERSION_PATCH=$(VERSION_PATCH) \
-		  -DVERSION="\"$(VERSION)\""
-# Make sure the version number gets updated on every git checkout
-ifneq ($(GITVERSION),)
-$(BIN)/version.o : ../.git/index
+DBGCOL_LIST	:= $(BIN)/.dbgcol.list
+ifeq ($(wildcard $(DBGCOL_LIST)),)
+DBGCOL_OLD := <invalid>
+else
+DBGCOL_OLD := $(shell cat $(DBGCOL_LIST))
 endif
+ifneq ($(DBGCOL_OLD),$(DBGCOL))
+$(shell $(ECHO) "$(DBGCOL)" > $(DBGCOL_LIST))
+endif
+
+$(DBGCOL_LIST) : $(MAKEDEPS)
+
+VERYCLEANUP += $(DBGCOL_LIST)
+
+DBGCOL_COLOURS := $(subst -, ,$(DBGCOL))
+DBGCOL_MIN := $(word 1,$(DBGCOL_COLOURS))
+DBGCOL_MAX := $(word 2,$(DBGCOL_COLOURS))
+
+debug_DEPS += $(DBGCOL_LIST)
+
+CFLAGS_debug += $(if $(DBGCOL_MIN),-DDBGCOL_MIN=$(DBGCOL_MIN))
+CFLAGS_debug += $(if $(DBGCOL_MAX),-DDBGCOL_MAX=$(DBGCOL_MAX))
 
 # We automatically generate rules for any file mentioned in AUTO_SRCS
 # using the following set of templates.  We use $(eval ...) if
@@ -941,7 +972,7 @@ ifneq ($(BLIB_OBJS_OLD),$(BLIB_OBJS))
 $(shell $(ECHO) "$(BLIB_OBJS)" > $(BLIB_LIST))
 endif
 
-$(BLIB_LIST) :
+$(BLIB_LIST) : $(MAKEDEPS)
 
 VERYCLEANUP	+= $(BLIB_LIST)
 
@@ -960,13 +991,31 @@ blib : $(BLIB)
 #
 BUILD_ID_CMD	:= perl -e 'printf "0x%08x", int ( rand ( 0xffffffff ) );'
 
+# Build timestamp
+#
+BUILD_TIMESTAMP := $(shell date +%s)
+
+# Build version
+#
+GIT_INDEX := $(if $(GITVERSION),$(if $(wildcard ../.git/index),../.git/index))
+$(BIN)/version.%.o : core/version.c $(MAKEDEPS) $(GIT_INDEX)
+	$(QM)$(ECHO) "  [VERSION] $@"
+	$(Q)$(COMPILE_c) -DBUILD_NAME="\"$*\"" \
+		-DVERSION_MAJOR=$(VERSION_MAJOR) \
+		-DVERSION_MINOR=$(VERSION_MINOR) \
+		-DVERSION_PATCH=$(VERSION_PATCH) \
+		-DVERSION="\"$(VERSION)\"" \
+		-c $< -o $@
+
 # Build an intermediate object file from the objects required for the
 # specified target.
 #
-$(BIN)/%.tmp : $(BLIB) $(MAKEDEPS) $(LDSCRIPT)
+$(BIN)/%.tmp : $(BIN)/version.%.o $(BLIB) $(MAKEDEPS) $(LDSCRIPT)
 	$(QM)$(ECHO) "  [LD] $@"
-	$(Q)$(LD) $(LDFLAGS) -T $(LDSCRIPT) $(TGT_LD_FLAGS) $(BLIB) -o $@ \
-		--defsym _build_id=`$(BUILD_ID_CMD)` -Map $(BIN)/$*.tmp.map
+	$(Q)$(LD) $(LDFLAGS) -T $(LDSCRIPT) $(TGT_LD_FLAGS) $< $(BLIB) -o $@ \
+		--defsym _build_id=`$(BUILD_ID_CMD)` \
+		--defsym _build_timestamp=$(BUILD_TIMESTAMP) \
+		-Map $(BIN)/$*.tmp.map
 	$(Q)$(OBJDUMP) -ht $@ | $(PERL) $(SORTOBJDUMP) >> $(BIN)/$*.tmp.map
 
 # Keep intermediate object file (useful for debugging)
@@ -1140,15 +1189,6 @@ else
 endif
 endif
 endif
-
-# Wrap up binary blobs (for embedded images)
-#
-$(BIN)/%.o : payload/%.img
-	$(QM)echo "  [WRAP] $@"
-	$(Q)$(LD) -b binary -r -o $@ $< --undefined obj_payload \
-		--defsym obj_$*=0
-
-BOBJS += $(patsubst payload/%.img,$(BIN)/%.o,$(wildcard payload/*.img))
 
 # Alias for ipxe.%
 #

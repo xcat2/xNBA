@@ -13,28 +13,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/tables.h>
 #include <ipxe/iobuf.h>
 #include <ipxe/netdevice.h>
-
-/** An ICMPv6 header */
-struct icmpv6_header {
-	/** Type */
-	uint8_t type;
-	/** Code */
-	uint8_t code;
-	/** Checksum */
-	uint16_t chksum;
-} __attribute__ (( packed ));
-
-/** An ICMPv6 echo request/reply */
-struct icmpv6_echo {
-	/** ICMPv6 header */
-	struct icmpv6_header icmp;
-	/** Identifier */
-	uint16_t ident;
-	/** Sequence number */
-	uint16_t sequence;
-	/** Data */
-	uint8_t data[0];
-} __attribute__ (( packed ));
+#include <ipxe/icmp.h>
 
 /** An ICMPv6 handler */
 struct icmpv6_handler {
@@ -67,11 +46,17 @@ struct icmpv6_handler {
 /** ICMPv6 echo reply */
 #define ICMPV6_ECHO_REPLY 129
 
+/** ICMPv6 router solicitation */
+#define ICMPV6_ROUTER_SOLICITATION 133
+
+/** ICMPv6 router advertisement */
+#define ICMPV6_ROUTER_ADVERTISEMENT 134
+
 /** ICMPv6 neighbour solicitation */
-#define ICMPV6_NDP_NEIGHBOUR_SOLICITATION 135
+#define ICMPV6_NEIGHBOUR_SOLICITATION 135
 
 /** ICMPv6 neighbour advertisement */
-#define ICMPV6_NDP_NEIGHBOUR_ADVERTISEMENT 136
+#define ICMPV6_NEIGHBOUR_ADVERTISEMENT 136
 
 extern struct tcpip_protocol icmpv6_protocol __tcpip_protocol;
 

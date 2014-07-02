@@ -35,9 +35,9 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/shell.h>
 #include <ipxe/features.h>
 #include <ipxe/image.h>
+#include <ipxe/timer.h>
 #include <usr/ifmgmt.h>
 #include <usr/route.h>
-#include <usr/dhcpmgmt.h>
 #include <usr/imgmgmt.h>
 #include <usr/prompt.h>
 #include <usr/autoboot.h>
@@ -49,6 +49,9 @@ FILE_LICENCE ( GPL2_OR_LATER );
  *
  */
 
+/** Device location of preferred autoboot device */
+struct device_description autoboot_device;
+
 /* Disambiguate the various error causes */
 #define ENOENT_BOOT __einfo_error ( EINFO_ENOENT_BOOT )
 #define EINFO_ENOENT_BOOT \
@@ -59,7 +62,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define CYAN	"\033[36m"
 
 /** The "scriptlet" setting */
-struct setting scriptlet_setting __setting ( SETTING_MISC ) = {
+const struct setting scriptlet_setting __setting ( SETTING_MISC, scriptlet ) = {
 	.name = "scriptlet",
 	.description = "Boot scriptlet",
 	.tag = DHCP_EB_SCRIPTLET,
@@ -74,15 +77,6 @@ __weak int pxe_menu_boot ( struct net_device *netdev __unused ) {
 }
 
 /**
- * Identify the boot network device
- *
- * @ret netdev		Boot network device
- */
-static struct net_device * find_boot_netdev ( void ) {
-	return NULL;
-}
-
-/**
  * Parse next-server and filename into a URI
  *
  * @v next_server	Next-server address
@@ -91,8 +85,6 @@ static struct net_device * find_boot_netdev ( void ) {
  */
 static struct uri * parse_next_server_and_filename ( struct in_addr next_server,
 						     const char *filename ) {
-	char buf[ 23 /* "tftp://xxx.xxx.xxx.xxx/" */ + strlen ( filename )
-		  + 1 /* NUL */ ];
 	struct uri *uri;
 
 	/* Parse filename */
@@ -100,17 +92,10 @@ static struct uri * parse_next_server_and_filename ( struct in_addr next_server,
 	if ( ! uri )
 		return NULL;
 
-	/* Construct a tftp:// URI for the filename, if applicable.
-	 * We can't just rely on the current working URI, because the
-	 * relative URI resolution will remove the distinction between
-	 * filenames with and without initial slashes, which is
-	 * significant for TFTP.
-	 */
+	/* Construct a TFTP URI for the filename, if applicable */
 	if ( next_server.s_addr && filename[0] && ! uri_is_absolute ( uri ) ) {
 		uri_put ( uri );
-		snprintf ( buf, sizeof ( buf ), "tftp://%s/%s",
-			   inet_ntoa ( next_server ), filename );
-		uri = parse_uri ( buf );
+		uri = tftp_uri ( next_server, filename );
 		if ( ! uri )
 			return NULL;
 	}
@@ -119,7 +104,8 @@ static struct uri * parse_next_server_and_filename ( struct in_addr next_server,
 }
 
 /** The "keep-san" setting */
-struct setting keep_san_setting __setting ( SETTING_SANBOOT_EXTRA ) = {
+const struct setting keep_san_setting __setting ( SETTING_SANBOOT_EXTRA,
+						  keep-san ) = {
 	.name = "keep-san",
 	.description = "Preserve SAN connection",
 	.tag = DHCP_EB_KEEP_SAN,
@@ -127,7 +113,8 @@ struct setting keep_san_setting __setting ( SETTING_SANBOOT_EXTRA ) = {
 };
 
 /** The "skip-san-boot" setting */
-struct setting skip_san_boot_setting __setting ( SETTING_SANBOOT_EXTRA ) = {
+const struct setting skip_san_boot_setting __setting ( SETTING_SANBOOT_EXTRA,
+						       skip-san-boot ) = {
 	.name = "skip-san-boot",
 	.description = "Do not boot from SAN device",
 	.tag = DHCP_EB_SKIP_SAN_BOOT,
@@ -178,7 +165,7 @@ int uriboot ( struct uri *filename, struct uri *root_path, int drive,
 
 	/* Attempt filename boot if applicable */
 	if ( filename ) {
-		if ( ( rc = imgdownload ( filename, &image ) ) != 0 )
+		if ( ( rc = imgdownload ( filename, 0, &image ) ) != 0 )
 			goto err_download;
 		image->flags |= IMAGE_AUTO_UNREGISTER;
 		if ( ( rc = image_exec ( image ) ) != 0 ) {
@@ -256,16 +243,15 @@ struct uri * fetch_next_server_and_filename ( struct settings *settings ) {
 	struct uri *uri = NULL;
 	char *filename;
 
-	/* Determine settings block containing the filename, if any */
-	settings = fetch_setting_origin ( settings, &filename_setting );
-
-	/* If we have a filename, fetch it along with next-server */
-	if ( settings ) {
+	/* If we have a filename, fetch it along with the next-server
+	 * setting from the same settings block.
+	 */
+	if ( fetch_setting ( settings, &filename_setting, &settings,
+			     NULL, NULL, 0 ) >= 0 ) {
+		fetch_string_setting_copy ( settings, &filename_setting,
+					    &raw_filename );
 		fetch_ipv4_setting ( settings, &next_server_setting,
 				     &next_server );
-		if ( fetch_string_setting_copy ( settings, &filename_setting,
-						 &raw_filename ) < 0 )
-			goto err_fetch;
 	}
 
 	/* Expand filename setting */
@@ -286,7 +272,6 @@ struct uri * fetch_next_server_and_filename ( struct settings *settings ) {
 	free ( filename );
  err_expand:
 	free ( raw_filename );
- err_fetch:
 	return uri;
 }
 
@@ -297,25 +282,30 @@ struct uri * fetch_next_server_and_filename ( struct settings *settings ) {
  * @ret uri		URI, or NULL on failure
  */
 static struct uri * fetch_root_path ( struct settings *settings ) {
-	char buf[256];
+	struct uri *uri = NULL;
+	char *raw_root_path;
 	char *root_path;
-	struct uri *uri;
 
 	/* Fetch root-path setting */
-	fetch_string_setting ( settings, &root_path_setting,
-			       buf, sizeof ( buf ) );
-	if ( buf[0] )
-		printf ( "Root path: %s\n", buf );
+	fetch_string_setting_copy ( settings, &root_path_setting,
+				    &raw_root_path );
 
 	/* Expand filename setting */
-	root_path = expand_settings ( buf );
+	root_path = expand_settings ( raw_root_path ? raw_root_path : "" );
 	if ( ! root_path )
-		return NULL;
+		goto err_expand;
 
 	/* Parse root path */
+	if ( root_path[0] )
+		printf ( "Root path: %s\n", root_path );
 	uri = parse_uri ( root_path );
+	if ( ! uri )
+		goto err_parse;
 
+ err_parse:
 	free ( root_path );
+ err_expand:
+	free ( raw_root_path );
 	return uri;
 }
 
@@ -331,7 +321,7 @@ static int have_pxe_menu ( void ) {
 		= { .tag = DHCP_PXE_DISCOVERY_CONTROL };
 	struct setting pxe_boot_menu_setting
 		= { .tag = DHCP_PXE_BOOT_MENU };
-	char buf[256];
+	char buf[ 10 /* "PXEClient" + NUL */ ];
 	unsigned int pxe_discovery_control;
 
 	fetch_string_setting ( NULL, &vendor_class_id_setting,
@@ -364,8 +354,8 @@ int netboot ( struct net_device *netdev ) {
 		goto err_ifopen;
 	ifstat ( netdev );
 
-	/* Configure device via DHCP */
-	if ( ( rc = dhcp ( netdev ) ) != 0 )
+	/* Configure device */
+	if ( ( rc = ifconf ( netdev, NULL ) ) != 0 )
 		goto err_dhcp;
 	route();
 
@@ -432,21 +422,36 @@ int netboot ( struct net_device *netdev ) {
 }
 
 /**
+ * Test if network device matches the autoboot device location
+ *
+ * @v netdev		Network device
+ * @ret is_autoboot	Network device matches the autoboot device location
+ */
+static int is_autoboot_device ( struct net_device *netdev ) {
+
+	return ( ( netdev->dev->desc.bus_type == autoboot_device.bus_type ) &&
+		 ( netdev->dev->desc.location == autoboot_device.location ) );
+}
+
+/**
  * Boot the system
  */
-int autoboot ( void ) {
-	struct net_device *boot_netdev;
+static int autoboot ( void ) {
 	struct net_device *netdev;
 	int rc = -ENODEV;
 
-	/* If we have an identifable boot device, try that first */
-	if ( ( boot_netdev = find_boot_netdev() ) )
-		rc = netboot ( boot_netdev );
-
-	/* If that fails, try booting from any of the other devices */
+	/* Try booting from each network device.  If we have a
+	 * specified autoboot device location, then use only devices
+	 * matching that location.
+	 */
 	for_each_netdev ( netdev ) {
-		if ( netdev == boot_netdev )
+
+		/* Skip any non-matching devices, if applicable */
+		if ( autoboot_device.bus_type &&
+		     ( ! is_autoboot_device ( netdev ) ) )
 			continue;
+
+		/* Attempt booting from this device */
 		rc = netboot ( netdev );
 	}
 
@@ -468,7 +473,8 @@ static int shell_banner ( void ) {
 	/* Prompt user */
 	printf ( "\n" );
 	return ( prompt ( "Press Ctrl-B for the iPXE command line...",
-			  ( BANNER_TIMEOUT * 100 ), CTRL_B ) == 0 );
+			  ( ( BANNER_TIMEOUT * TICKS_PER_SEC ) / 10 ),
+			  CTRL_B ) == 0 );
 }
 
 /**
@@ -493,10 +499,10 @@ void ipxe ( struct net_device *netdev ) {
 	 * do so.
 	 *
 	 */
-	printf ( NORMAL "\n\n" PRODUCT_NAME "\n" BOLD "iPXE %s"
+	printf ( NORMAL "\n\n%s\n" BOLD "iPXE %s"
 		 NORMAL " -- Open Source Network Boot Firmware -- "
 		 CYAN "http://ipxe.org" NORMAL "\n"
-		 "Features:", product_version );
+		 "Features:", product_name, product_version );
 	for_each_table_entry ( feature, FEATURES )
 		printf ( " %s", feature->name );
 	printf ( "\n" );

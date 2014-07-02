@@ -34,6 +34,7 @@ OBJCOPY		:= $(CROSS_COMPILE)objcopy
 NM		:= $(CROSS_COMPILE)nm
 OBJDUMP		:= $(CROSS_COMPILE)objdump
 OPENSSL		:= openssl
+CSPLIT		:= csplit
 PARSEROM	:= ./util/parserom.pl
 FIXROM		:= ./util/fixrom.pl
 SYMCHECK	:= ./util/symcheck.pl
@@ -95,6 +96,7 @@ SRCDIRS		+= config
 # automatic build system.
 #
 NON_AUTO_SRCS	:=
+NON_AUTO_SRCS	+= core/version.c
 NON_AUTO_SRCS	+= drivers/net/prism2.c
 
 # INCDIRS lists the include path
@@ -108,7 +110,11 @@ INCDIRS		+= include .
 # helpfully suggestive message
 #
 ALL		:= bin/blib.a bin/ipxe.dsk bin/ipxe.lkrn bin/ipxe.iso \
-		   bin/ipxe.usb bin/ipxe.pxe bin/undionly.kpxe bin/rtl8139.rom
+		   bin/ipxe.usb bin/ipxe.pxe bin/undionly.kpxe bin/rtl8139.rom \
+		   bin/8086100e.mrom bin/80861209.rom bin/10500940.rom \
+		   bin/10222000.rom bin/10ec8139.rom bin/1af41000.rom \
+		   bin/8086100f.mrom bin/808610d3.mrom bin/15ad07b0.rom
+
 all : $(ALL)
 	@$(ECHO) '==========================================================='
 	@$(ECHO)

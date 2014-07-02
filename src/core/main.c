@@ -17,8 +17,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <stddef.h>
 #include <stdio.h>
 #include <ipxe/init.h>
+#include <ipxe/version.h>
 #include <usr/autoboot.h>
-#include <config/general.h>
 
 /**
  * Main entry point
@@ -27,9 +27,11 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 __asmcall int main ( void ) {
 
-	/* Some devices take an unreasonably long time to initialise */
-	printf ( PRODUCT_SHORT_NAME " initialising devices..." );
+	/* Perform one-time-only initialisation (e.g. heap) */
 	initialise();
+
+	/* Some devices take an unreasonably long time to initialise */
+	printf ( "%s initialising devices...", product_short_name );
 	startup();
 	printf ( "ok\n" );
 

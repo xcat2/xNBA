@@ -32,6 +32,8 @@ struct efi_snp_device {
 	EFI_SIMPLE_NETWORK_PROTOCOL snp;
 	/** The SNP "mode" (parameters) */
 	EFI_SIMPLE_NETWORK_MODE mode;
+	/** Started flag */
+	int started;
 	/** Outstanding TX packet count (via "interrupt status")
 	 *
 	 * Used in order to generate TX completions.
@@ -63,7 +65,7 @@ struct efi_snp_device {
 	/** Driver name */
 	wchar_t driver_name[16];
 	/** Controller name */
-	wchar_t controller_name[32];
+	wchar_t controller_name[64];
 	/** The device path
 	 *
 	 * This field is variable in size and must appear at the end
@@ -75,5 +77,7 @@ struct efi_snp_device {
 extern int efi_snp_hii_install ( struct efi_snp_device *snpdev );
 extern void efi_snp_hii_uninstall ( struct efi_snp_device *snpdev );
 extern struct efi_snp_device * last_opened_snpdev ( void );
+extern void efi_snp_claim ( void );
+extern void efi_snp_release ( void );
 
 #endif /* _IPXE_EFI_SNP_H */

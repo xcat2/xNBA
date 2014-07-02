@@ -36,32 +36,32 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 /** Network device predefined settings */
-struct setting mac_setting __setting ( SETTING_NETDEV ) = {
+const struct setting mac_setting __setting ( SETTING_NETDEV, mac ) = {
 	.name = "mac",
 	.description = "MAC address",
 	.type = &setting_type_hex,
 };
-struct setting machyp_setting __setting ( SETTING_NETDEV ) = {
+const struct setting machyp_setting __setting ( SETTING_NETDEV, machyp ) = {
 	.name = "machyp",
 	.description = "MAC address",
 	.type = &setting_type_hexhyp,
 };
-struct setting bustype_setting __setting ( SETTING_NETDEV ) = {
+const struct setting bustype_setting __setting ( SETTING_NETDEV, bustype ) = {
 	.name = "bustype",
 	.description = "Bus type",
 	.type = &setting_type_string,
 };
-struct setting busloc_setting __setting ( SETTING_NETDEV ) = {
+const struct setting busloc_setting __setting ( SETTING_NETDEV, busloc ) = {
 	.name = "busloc",
 	.description = "Bus location",
 	.type = &setting_type_uint32,
 };
-struct setting busid_setting __setting ( SETTING_NETDEV ) = {
+const struct setting busid_setting __setting ( SETTING_NETDEV, busid ) = {
 	.name = "busid",
 	.description = "Bus ID",
 	.type = &setting_type_hex,
 };
-struct setting chip_setting __setting ( SETTING_NETDEV ) = {
+const struct setting chip_setting __setting ( SETTING_NETDEV, chip ) = {
 	.name = "chip",
 	.description = "Chip",
 	.type = &setting_type_string,
@@ -199,7 +199,7 @@ static int netdev_fetch_chip ( struct net_device *netdev, void *data,
 /** A network device setting operation */
 struct netdev_setting_operation {
 	/** Setting */
-	struct setting *setting;
+	const struct setting *setting;
 	/** Store setting (or NULL if not supported)
 	 *
 	 * @v netdev		Network device
@@ -238,7 +238,8 @@ static struct netdev_setting_operation netdev_setting_operations[] = {
  * @v len		Length of setting data
  * @ret rc		Return status code
  */
-static int netdev_store ( struct settings *settings, struct setting *setting,
+static int netdev_store ( struct settings *settings,
+			  const struct setting *setting,
 			  const void *data, size_t len ) {
 	struct net_device *netdev = container_of ( settings, struct net_device,
 						   settings.settings );

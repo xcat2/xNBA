@@ -121,7 +121,7 @@ static struct interface_descriptor validator_job_desc =
  */
 
 /** Cross-signed certificate source setting */
-struct setting crosscert_setting __setting ( SETTING_CRYPTO ) = {
+const struct setting crosscert_setting __setting ( SETTING_CRYPTO, crosscert )={
 	.name = "crosscert",
 	.description = "Cross-signed certificate source",
 	.tag = DHCP_EB_CROSS_CERT,
@@ -179,7 +179,7 @@ static int validator_append ( struct validator *validator,
 		}
 		cert = x509_last ( certs );
 		DBGC ( validator, "VALIDATOR %p found certificate %s\n",
-		       validator, cert->subject.name );
+		       validator, x509_name ( cert ) );
 
 		/* Move to next certificate */
 		asn1_skip_any ( &cursor );
@@ -232,14 +232,7 @@ static int validator_start_download ( struct validator *validator,
 	int rc;
 
 	/* Determine cross-signed certificate source */
-	len = fetch_string_setting_copy ( NULL, &crosscert_setting,
-					  &crosscert_copy );
-	if ( len < 0 ) {
-		rc = len;
-		DBGC ( validator, "VALIDATOR %p could not fetch crosscert "
-		       "setting: %s\n", validator, strerror ( rc ) );
-		goto err_fetch_crosscert;
-	}
+	fetch_string_setting_copy ( NULL, &crosscert_setting, &crosscert_copy );
 	crosscert = ( crosscert_copy ? crosscert_copy : crosscert_default );
 
 	/* Allocate URI string */
@@ -279,7 +272,6 @@ static int validator_start_download ( struct validator *validator,
 	free ( uri_string );
  err_alloc_uri_string:
 	free ( crosscert_copy );
- err_fetch_crosscert:
 	return rc;
 }
 
@@ -466,7 +458,7 @@ static void validator_step ( struct validator *validator ) {
 	 * previously.
 	 */
 	now = time ( NULL );
-	if ( ( rc = x509_validate_chain ( validator->chain, now,
+	if ( ( rc = x509_validate_chain ( validator->chain, now, NULL,
 					  NULL ) ) == 0 ) {
 		validator_finished ( validator, 0 );
 		return;
@@ -485,7 +477,7 @@ static void validator_step ( struct validator *validator ) {
 		/* The issuer is valid, but this certificate is not
 		 * yet valid.  If OCSP is applicable, start it.
 		 */
-		if ( cert->extensions.auth_info.ocsp.uri &&
+		if ( cert->extensions.auth_info.ocsp.uri.len &&
 		     ( ! cert->extensions.auth_info.ocsp.good ) ) {
 			/* Start OCSP */
 			if ( ( rc = validator_start_ocsp ( validator, cert,

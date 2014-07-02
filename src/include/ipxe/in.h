@@ -50,12 +50,18 @@ struct in6_addr {
 #define s6_addr32       in6_u.u6_addr32
 };
 
+#define IN6_IS_ADDR_UNSPECIFIED( addr )					\
+	( ( ( ( ( const uint32_t * ) (addr) )[0] ) |			\
+	    ( ( ( const uint32_t * ) (addr) )[1] ) |			\
+	    ( ( ( const uint32_t * ) (addr) )[2] ) |			\
+	    ( ( ( const uint32_t * ) (addr) )[3] ) ) == 0 )
+
 #define IN6_IS_ADDR_MULTICAST( addr )					\
 	( *( ( const uint8_t * ) (addr) ) == 0xff )
 
 #define IN6_IS_ADDR_LINKLOCAL( addr )					\
 	( ( *( ( const uint16_t * ) (addr) ) & htons ( 0xffc0 ) ) ==	\
-	  htonl ( 0xfe80 ) )
+	  htons ( 0xfe80 ) )
 
 /**
  * IPv4 socket address
@@ -82,7 +88,7 @@ struct sockaddr_in {
 		    sizeof ( uint16_t ) /* sin_flags */ +
 		    sizeof ( uint16_t ) /* sin_port */ +
 		    sizeof ( struct in_addr ) /* sin_addr */ ) ];
-} __attribute__ (( may_alias ));
+} __attribute__ (( packed, may_alias ));
 
 /**
  * IPv6 socket address
@@ -116,7 +122,7 @@ struct sockaddr_in6 {
 		    sizeof ( uint16_t ) /* sin6_port */ +
 		    sizeof ( uint16_t ) /* sin6_scope_id */ +
 		    sizeof ( struct in6_addr ) /* sin6_addr */ ) ];
-} __attribute__ (( may_alias ));
+} __attribute__ (( packed, may_alias ));
 
 extern int inet_aton ( const char *cp, struct in_addr *inp );
 extern char * inet_ntoa ( struct in_addr in );

@@ -52,8 +52,7 @@ static struct option_descriptor imgtrust_opts[] = {
 
 /** "imgtrust" command descriptor */
 static struct command_descriptor imgtrust_cmd =
-	COMMAND_DESC ( struct imgtrust_options, imgtrust_opts, 0, 0,
-		       "[--allow] [--permanent]" );
+	COMMAND_DESC ( struct imgtrust_options, imgtrust_opts, 0, 0, NULL );
 
 /**
  * The "imgtrust" command
@@ -87,6 +86,8 @@ struct imgverify_options {
 	char *signer;
 	/** Keep signature after verification */
 	int keep;
+	/** Download timeout */
+	unsigned long timeout;
 };
 
 /** "imgverify" option list */
@@ -95,13 +96,14 @@ static struct option_descriptor imgverify_opts[] = {
 		      struct imgverify_options, signer, parse_string ),
 	OPTION_DESC ( "keep", 'k', no_argument,
 		      struct imgverify_options, keep, parse_flag ),
+	OPTION_DESC ( "timeout", 't', required_argument,
+		      struct imgverify_options, timeout, parse_timeout),
 };
 
 /** "imgverify" command descriptor */
 static struct command_descriptor imgverify_cmd =
 	COMMAND_DESC ( struct imgverify_options, imgverify_opts, 2, 2,
-		       "[--signer <signer>] [--keep] <uri|image> "
-		       "<signature uri|image>" );
+		       "<uri|image> <signature uri|image>" );
 
 /**
  * The "imgverify" command
@@ -129,11 +131,12 @@ static int imgverify_exec ( int argc, char **argv ) {
 	signature_name_uri = argv[ optind + 1 ];
 
 	/* Acquire the image */
-	if ( ( rc = imgacquire ( image_name_uri, &image ) ) != 0 )
+	if ( ( rc = imgacquire ( image_name_uri, opts.timeout, &image ) ) != 0 )
 		goto err_acquire_image;
 
 	/* Acquire the signature image */
-	if ( ( rc = imgacquire ( signature_name_uri, &signature ) ) != 0 )
+	if ( ( rc = imgacquire ( signature_name_uri, opts.timeout,
+				 &signature ) ) != 0 )
 		goto err_acquire_signature;
 
 	/* Verify image */

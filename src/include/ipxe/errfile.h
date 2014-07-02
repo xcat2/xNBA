@@ -64,6 +64,10 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_xferbuf		       ( ERRFILE_CORE | 0x00180000 )
 #define ERRFILE_pending		       ( ERRFILE_CORE | 0x00190000 )
 #define ERRFILE_null_reboot	       ( ERRFILE_CORE | 0x001a0000 )
+#define ERRFILE_pinger		       ( ERRFILE_CORE | 0x001b0000 )
+#define ERRFILE_fbcon		       ( ERRFILE_CORE | 0x001c0000 )
+#define ERRFILE_ansicol		       ( ERRFILE_CORE | 0x001d0000 )
+#define ERRFILE_ansicoldef	       ( ERRFILE_CORE | 0x001e0000 )
 
 #define ERRFILE_eisa		     ( ERRFILE_DRIVER | 0x00000000 )
 #define ERRFILE_isa		     ( ERRFILE_DRIVER | 0x00010000 )
@@ -184,7 +188,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_slam			( ERRFILE_NET | 0x00160000 )
 #define ERRFILE_ib_sma			( ERRFILE_NET | 0x00170000 )
 #define ERRFILE_ib_packet		( ERRFILE_NET | 0x00180000 )
-#define ERRFILE_icmp			( ERRFILE_NET | 0x00190000 )
+#define ERRFILE_icmpv4			( ERRFILE_NET | 0x00190000 )
 #define ERRFILE_ib_qset			( ERRFILE_NET | 0x001a0000 )
 #define ERRFILE_ib_gma			( ERRFILE_NET | 0x001b0000 )
 #define ERRFILE_ib_pathrec		( ERRFILE_NET | 0x001c0000 )
@@ -215,6 +219,11 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_mount			( ERRFILE_NET | 0x00350000 )
 #define ERRFILE_oncrpc_iob		( ERRFILE_NET | 0x00360000 )
 #define ERRFILE_neighbour		( ERRFILE_NET | 0x00370000 )
+#define ERRFILE_socket			( ERRFILE_NET | 0x00380000 )
+#define ERRFILE_icmp			( ERRFILE_NET | 0x00390000 )
+#define ERRFILE_ping			( ERRFILE_NET | 0x003a0000 )
+#define ERRFILE_dhcpv6			( ERRFILE_NET | 0x003b0000 )
+#define ERRFILE_nfs_uri			( ERRFILE_NET | 0x003c0000 )
 
 #define ERRFILE_image		      ( ERRFILE_IMAGE | 0x00000000 )
 #define ERRFILE_elf		      ( ERRFILE_IMAGE | 0x00010000 )
@@ -222,6 +231,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_segment		      ( ERRFILE_IMAGE | 0x00030000 )
 #define ERRFILE_efi_image	      ( ERRFILE_IMAGE | 0x00040000 )
 #define ERRFILE_embedded	      ( ERRFILE_IMAGE | 0x00050000 )
+#define ERRFILE_pnm		      ( ERRFILE_IMAGE | 0x00060000 )
+#define ERRFILE_png		      ( ERRFILE_IMAGE | 0x00070000 )
 
 #define ERRFILE_asn1		      ( ERRFILE_OTHER | 0x00000000 )
 #define ERRFILE_chap		      ( ERRFILE_OTHER | 0x00010000 )
@@ -288,7 +299,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ERRFILE_efi_reboot	      ( ERRFILE_OTHER | 0x003e0000 )
 #define ERRFILE_memmap_settings	      ( ERRFILE_OTHER | 0x003f0000 )
 #define ERRFILE_param_cmd	      ( ERRFILE_OTHER | 0x00400000 )
-#define ERRFILE_efi_entropy	      ( ERRFILE_OTHER | 0x00410000 )
+#define ERRFILE_deflate		      ( ERRFILE_OTHER | 0x00410000 )
+#define ERRFILE_efi_entropy	      ( ERRFILE_OTHER | 0x00420000 )
 
 /** @} */
 

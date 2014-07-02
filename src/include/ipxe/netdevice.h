@@ -14,6 +14,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/tables.h>
 #include <ipxe/refcnt.h>
 #include <ipxe/settings.h>
+#include <ipxe/interface.h>
 
 struct io_buffer;
 struct net_device;
@@ -292,6 +293,48 @@ struct net_device_stats {
 	struct net_device_error errors[NETDEV_MAX_UNIQUE_ERRORS];
 };
 
+/** A network device configuration */
+struct net_device_configuration {
+	/** Network device */
+	struct net_device *netdev;
+	/** Network device configurator */
+	struct net_device_configurator *configurator;
+	/** Configuration status */
+	int rc;
+	/** Job control interface */
+	struct interface job;
+};
+
+/** A network device configurator */
+struct net_device_configurator {
+	/** Name */
+	const char *name;
+	/** Check applicability of configurator
+	 *
+	 * @v netdev		Network device
+	 * @ret applies		Configurator applies to this network device
+	 */
+	int ( * applies ) ( struct net_device *netdev );
+	/** Start configuring network device
+	 *
+	 * @v job		Job control interface
+	 * @v netdev		Network device
+	 * @ret rc		Return status code
+	 */
+	int ( * start ) ( struct interface *job, struct net_device *netdev );
+};
+
+/** Network device configurator table */
+#define NET_DEVICE_CONFIGURATORS \
+	__table ( struct net_device_configurator, "net_device_configurators" )
+
+/** Declare a network device configurator */
+#define __net_device_configurator \
+	__table_entry ( NET_DEVICE_CONFIGURATORS, 01 )
+
+/** Maximum length of a network device name */
+#define NETDEV_NAME_LEN 12
+
 /**
  * A network device
  *
@@ -312,7 +355,7 @@ struct net_device {
 	/** Index of this network device */
 	unsigned int index;
 	/** Name of this network device */
-	char name[12];
+	char name[NETDEV_NAME_LEN];
 	/** Underlying hardware device */
 	struct device *dev;
 
@@ -371,6 +414,9 @@ struct net_device {
 
 	/** Driver private data */
 	void *priv;
+
+	/** Network device configurations (variable length) */
+	struct net_device_configuration configs[0];
 };
 
 /** Network device is open */
@@ -529,6 +575,35 @@ netdev_settings_init ( struct net_device *netdev ) {
 }
 
 /**
+ * Get network device configuration
+ *
+ * @v netdev		Network device
+ * @v configurator	Network device configurator
+ * @ret config		Network device configuration
+ */
+static inline struct net_device_configuration *
+netdev_configuration ( struct net_device *netdev,
+		       struct net_device_configurator *configurator ) {
+
+	return &netdev->configs[ table_index ( NET_DEVICE_CONFIGURATORS,
+					       configurator ) ];
+}
+
+/**
+ * Check if configurator applies to network device
+ *
+ * @v netdev		Network device
+ * @v configurator	Network device configurator
+ * @ret applies		Configurator applies to network device
+ */
+static inline int
+netdev_configurator_applies ( struct net_device *netdev,
+			      struct net_device_configurator *configurator ) {
+	return ( ( configurator->applies == NULL ) ||
+		 configurator->applies ( netdev ) );
+}
+
+/**
  * Check link state of network device
  *
  * @v netdev		Network device
@@ -583,6 +658,8 @@ netdev_rx_frozen ( struct net_device *netdev ) {
 	return ( netdev->state & NETDEV_RX_FROZEN );
 }
 
+extern void netdev_rx_freeze ( struct net_device *netdev );
+extern void netdev_rx_unfreeze ( struct net_device *netdev );
 extern void netdev_link_err ( struct net_device *netdev, int rc );
 extern void netdev_link_down ( struct net_device *netdev );
 extern int netdev_tx ( struct net_device *netdev, struct io_buffer *iobuf );
@@ -605,6 +682,7 @@ extern void netdev_close ( struct net_device *netdev );
 extern void unregister_netdev ( struct net_device *netdev );
 extern void netdev_irq ( struct net_device *netdev, int enable );
 extern struct net_device * find_netdev ( const char *name );
+extern struct net_device * find_netdev_by_index ( unsigned int index );
 extern struct net_device * find_netdev_by_location ( unsigned int bus_type,
 						     unsigned int location );
 extern struct net_device * last_opened_netdev ( void );
@@ -615,6 +693,13 @@ extern int net_rx ( struct io_buffer *iobuf, struct net_device *netdev,
 		    uint16_t net_proto, const void *ll_dest,
 		    const void *ll_source, unsigned int flags );
 extern void net_poll ( void );
+extern struct net_device_configurator *
+find_netdev_configurator ( const char *name );
+extern int netdev_configure ( struct net_device *netdev,
+			      struct net_device_configurator *configurator );
+extern int netdev_configure_all ( struct net_device *netdev );
+extern int netdev_configuration_in_progress ( struct net_device *netdev );
+extern int netdev_configuration_ok ( struct net_device *netdev );
 
 /**
  * Complete network transmission
@@ -648,26 +733,6 @@ static inline void netdev_tx_complete_next ( struct net_device *netdev ) {
 static inline __attribute__ (( always_inline )) void
 netdev_link_up ( struct net_device *netdev ) {
 	netdev_link_err ( netdev, 0 );
-}
-
-/**
- * Freeze network device receive queue processing
- *
- * @v netdev		Network device
- */
-static inline __attribute__ (( always_inline )) void
-netdev_rx_freeze ( struct net_device *netdev ) {
-	netdev->state |= NETDEV_RX_FROZEN;
-}
-
-/**
- * Unfreeze network device receive queue processing
- *
- * @v netdev		Network device
- */
-static inline __attribute__ (( always_inline )) void
-netdev_rx_unfreeze ( struct net_device *netdev ) {
-	netdev->state &= ~NETDEV_RX_FROZEN;
 }
 
 #endif /* _IPXE_NETDEVICE_H */
