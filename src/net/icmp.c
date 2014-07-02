@@ -126,33 +126,6 @@ int icmp_tx_echo_request ( struct io_buffer *iobuf,
 }
 
 /**
- * Transmit ICMP echo reply
- *
- * @v iobuf		I/O buffer
- * @v st_dest		Destination socket address
- * @ret rc		Return status code
- */
-static int icmp_tx_echo_reply ( struct io_buffer *iobuf,
-				struct sockaddr_tcpip *st_dest,
-				struct icmp_echo_protocol *echo_protocol ) {
-/*
-	struct icmp_echo *echo = iobuf->data;
-	int rc;
-
-	/* Set type */
-	echo->icmp.type = echo_protocol->reply;
-
-	/* Transmit reply */
-	DBGC ( icmpcol ( st_dest ), "ICMP TX echo reply id %04x seq %04x\n",
-	       ntohs ( echo->ident ), ntohs ( echo->sequence ) );
-	if ( ( rc = icmp_tx_echo ( iobuf, st_dest, echo_protocol ) ) != 0 )
-		return rc;
-*/
-
-	return 0;
-}
-
-/**
  * Process a received ICMP echo request
  *
  * @v iobuf		I/O buffer
@@ -164,7 +137,7 @@ int icmp_rx_echo_request ( struct io_buffer *iobuf,
 			   struct sockaddr_tcpip *st_src,
 			   struct icmp_echo_protocol *echo_protocol ) {
 	struct icmp_echo *echo = iobuf->data;
-	int rc;
+        (void)(echo_protocol);
 
 	/* Sanity check */
 	if ( iob_len ( iobuf ) < sizeof ( *echo ) ) {
@@ -176,10 +149,6 @@ int icmp_rx_echo_request ( struct io_buffer *iobuf,
 	}
 	DBGC ( icmpcol ( st_src ), "ICMP RX echo request id %04x seq %04x\n",
 	       ntohs ( echo->ident ), ntohs ( echo->sequence ) );
-
-	/* Transmit echo reply */
-	if ( ( rc = icmp_tx_echo_reply ( iobuf, st_src, echo_protocol ) ) != 0 )
-		return rc;
 
 	return 0;
 }
