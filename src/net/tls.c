@@ -2445,15 +2445,14 @@ static int tls_validator_name( struct tls_session *tls, struct x509_certificate 
 	if ( ( cert->subject.name == NULL ) && ( !cert->extensions.subject_alt_name.present ) ) {
 		return -1;
 	}
-	if ( cert->extensions.subject_alt_name.present ) {
-		struct x509_san_link* link;
-		list_for_each_entry ( link, &cert->extensions.subject_alt_name.names, list ) {
-			/* If the name matches, return 0, otherwise, continue */
-			if ( dns_wildcard_matcher ( tls->name, link->name ) == 0) {
-				return 0;
-			}
+	struct x509_san_link* link;
+	list_for_each_entry ( link, &cert->extensions.subject_alt_name.names, list ) {
+		/* If the name matches, return 0, otherwise, continue */
+		if ( dns_wildcard_matcher ( tls->name, link->name ) == 0) {
+			return 0;
 		}
-    } else {
+	}
+	if ( !cert->extensions.subject_alt_name.present ) {
 		return dns_wildcard_matcher ( tls->name, cert->subject.name );
 	}
 	return -1;
