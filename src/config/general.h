@@ -129,7 +129,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #undef FCMGMT_CMD		/* Fibre Channel management commands */
 #undef	ROUTE_CMD		/* Routing table management commands */
 #define IMAGE_CMD		/* Image management commands */
-#undef DHCP_CMD		/* DHCP management commands */
+#define DHCP_CMD		/* DHCP management commands */
 #define SANBOOT_CMD		/* SAN boot commands */
 #undef MENU_CMD		/* Menu commands */
 #undef LOGIN_CMD		/* Login command */
