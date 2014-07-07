@@ -42,7 +42,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
  * initialisation vector, thus rendering the banner almost invisible
  * to the user.
  */
-#define BANNER_TIMEOUT		20
+#define BANNER_TIMEOUT		0
 #define ROM_BANNER_TIMEOUT	( 2 * BANNER_TIMEOUT )
 
 /*
