@@ -171,8 +171,8 @@ struct dhcp_session_state {
 	void ( * expired ) ( struct dhcp_session *dhcp );
 	/** Transmitted message type */
 	uint8_t tx_msgtype;
-	/** Apply minimum timeout */
-	uint8_t apply_min_timeout;
+    uint8_t min_timeout;
+    uint8_t max_timeout;
 };
 
 static struct dhcp_session_state dhcp_state_discover;
@@ -272,9 +272,8 @@ static void dhcp_set_state ( struct dhcp_session *dhcp,
 	dhcp->state = state;
 	dhcp->start = currticks();
 	stop_timer ( &dhcp->timer );
-	dhcp->timer.min_timeout =
-		( state->apply_min_timeout ? DHCP_MIN_TIMEOUT : 0 );
-	dhcp->timer.max_timeout = DHCP_MAX_TIMEOUT;
+    dhcp->timer.min_timeout = state->min_timeout * TICKS_PER_SEC;
+    dhcp->timer.max_timeout = state->max_timeout * TICKS_PER_SEC;
 	start_timer_nodelay ( &dhcp->timer );
 }
 
@@ -447,7 +446,8 @@ static struct dhcp_session_state dhcp_state_discover = {
 	.rx			= dhcp_discovery_rx,
 	.expired		= dhcp_discovery_expired,
 	.tx_msgtype		= DHCPDISCOVER,
-	.apply_min_timeout	= 1,
+    .min_timeout    = 4,
+    .max_timeout    = 32,
 };
 
 /**
@@ -584,7 +584,8 @@ static struct dhcp_session_state dhcp_state_request = {
 	.rx			= dhcp_request_rx,
 	.expired		= dhcp_request_expired,
 	.tx_msgtype		= DHCPREQUEST,
-	.apply_min_timeout	= 0,
+    .min_timeout    = 1,
+    .max_timeout    = 8,
 };
 
 /**
@@ -685,7 +686,8 @@ static struct dhcp_session_state dhcp_state_proxy = {
 	.rx			= dhcp_proxy_rx,
 	.expired		= dhcp_proxy_expired,
 	.tx_msgtype		= DHCPREQUEST,
-	.apply_min_timeout	= 0,
+    .min_timeout    = 1,
+    .max_timeout    = 8,
 };
 
 /**
@@ -832,7 +834,8 @@ static struct dhcp_session_state dhcp_state_pxebs = {
 	.rx			= dhcp_pxebs_rx,
 	.expired		= dhcp_pxebs_expired,
 	.tx_msgtype		= DHCPREQUEST,
-	.apply_min_timeout	= 1,
+    .min_timeout    = 1,
+    .max_timeout    = 8,
 };
 
 /****************************************************************************
