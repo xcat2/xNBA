@@ -33,6 +33,8 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/rsa.h>
 #include <ipxe/rootcert.h>
 #include <ipxe/certstore.h>
+#include <ipxe/socket.h>
+#include <ipxe/in.h>
 #include <ipxe/x509.h>
 #include <config/crypto.h>
 
@@ -1418,6 +1420,45 @@ static int x509_check_dnsname ( struct x509_certificate *cert,
 }
 
 /**
+ * Check X.509 certificate alternative iPAddress
+ *
+ * @v cert		X.509 certificate
+ * @v raw		ASN.1 cursor
+ * @v name		Name
+ * @ret rc		Return status code
+ */
+static int x509_check_ipaddress ( struct x509_certificate *cert,
+				const struct asn1_cursor *raw,
+				const char *name ) {
+	size_t len = raw->len;
+	struct sockaddr sa;
+	if ( sock_aton ( name, &sa ) != 0 ) {
+		DBGC2( cert, "Name \"%s\" did not resemble a numeric address, skipping", name );
+		return -ENOENT;
+	}
+	if ( sa.sa_family == AF_INET ) {
+		struct sockaddr_in *sin = ( ( struct sockaddr_in * ) &sa );
+		if ( len != 4 ) {
+			DBGC2( cert, "\"%s\" is IPv4, but certificate iPAddress is not IPv4", name );
+			return -ENOENT;
+		}
+		if ( memcmp ( raw->data, & ( sin->sin_addr.s_addr ), len ) == 0 ) {
+			return 0;
+		}
+	} else if ( sa.sa_family == AF_INET6 ) {
+		struct sockaddr_in6 *sin6 = ( ( struct sockaddr_in6 * ) &sa );
+		if ( len != 16 ) {
+			DBGC2( cert, "\"%s\" is IPv6, but certificate iPAddress is not IPv6", name );
+			return -ENOENT;
+		}
+		if ( memcmp ( raw->data, sin6->sin6_addr.s6_addr16, 16 ) == 0) {
+			return 0;
+		}
+	}
+	return -ENOENT;
+}
+
+/**
  * Check X.509 certificate alternative name
  *
  * @v cert		X.509 certificate
@@ -1440,6 +1481,8 @@ static int x509_check_alt_name ( struct x509_certificate *cert,
 	switch ( type ) {
 	case X509_GENERAL_NAME_DNS :
 		return x509_check_dnsname ( cert, &alt_name, name );
+	case X509_GENERAL_NAME_IP :
+		return x509_check_ipaddress ( cert, &alt_name, name );
 	default:
 		DBGC2 ( cert, "X509 %p \"%s\" unknown name of type %#02x:\n",
 			cert, x509_name ( cert ), type );
