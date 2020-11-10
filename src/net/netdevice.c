@@ -15,9 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -35,6 +39,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/device.h>
 #include <ipxe/errortab.h>
 #include <ipxe/profile.h>
+#include <ipxe/fault.h>
 #include <ipxe/vlan.h>
 #include <ipxe/netdevice.h>
 
@@ -49,6 +54,9 @@ struct list_head net_devices = LIST_HEAD_INIT ( net_devices );
 
 /** List of open network devices, in reverse order of opening */
 static struct list_head open_net_devices = LIST_HEAD_INIT ( open_net_devices );
+
+/** Network device index */
+static unsigned int netdev_index = 0;
 
 /** Network polling profiler */
 static struct profiler net_poll_profiler __profiler = { .name = "net.poll" };
@@ -154,6 +162,9 @@ void netdev_rx_unfreeze ( struct net_device *netdev ) {
  */
 void netdev_link_err ( struct net_device *netdev, int rc ) {
 
+	/* Stop link block timer */
+	stop_timer ( &netdev->link_block );
+
 	/* Record link state */
 	netdev->link_rc = rc;
 	if ( netdev->link_rc == 0 ) {
@@ -181,6 +192,50 @@ void netdev_link_down ( struct net_device *netdev ) {
 	     ( netdev->link_rc == -EUNKNOWN_LINK_STATUS ) ) {
 		netdev_link_err ( netdev, -ENOTCONN_LINK_DOWN );
 	}
+}
+
+/**
+ * Mark network device link as being blocked
+ *
+ * @v netdev		Network device
+ * @v timeout		Timeout (in ticks)
+ */
+void netdev_link_block ( struct net_device *netdev, unsigned long timeout ) {
+
+	/* Start link block timer */
+	if ( ! netdev_link_blocked ( netdev ) ) {
+		DBGC ( netdev, "NETDEV %s link blocked for %ld ticks\n",
+		       netdev->name, timeout );
+	}
+	start_timer_fixed ( &netdev->link_block, timeout );
+}
+
+/**
+ * Mark network device link as being unblocked
+ *
+ * @v netdev		Network device
+ */
+void netdev_link_unblock ( struct net_device *netdev ) {
+
+	/* Stop link block timer */
+	if ( netdev_link_blocked ( netdev ) )
+		DBGC ( netdev, "NETDEV %s link unblocked\n", netdev->name );
+	stop_timer ( &netdev->link_block );
+}
+
+/**
+ * Handle network device link block timer expiry
+ *
+ * @v timer		Link block timer
+ * @v fail		Failure indicator
+ */
+static void netdev_link_block_expired ( struct retry_timer *timer,
+					int fail __unused ) {
+	struct net_device *netdev =
+		container_of ( timer, struct net_device, link_block );
+
+	/* Assume link is no longer blocked */
+	DBGC ( netdev, "NETDEV %s link block expired\n", netdev->name );
 }
 
 /**
@@ -249,11 +304,8 @@ int netdev_tx ( struct net_device *netdev, struct io_buffer *iobuf ) {
 	}
 
 	/* Discard packet (for test purposes) if applicable */
-	if ( ( NETDEV_DISCARD_RATE > 0 ) &&
-	     ( ( random() % NETDEV_DISCARD_RATE ) == 0 ) ) {
-		rc = -EAGAIN;
+	if ( ( rc = inject_fault ( NETDEV_DISCARD_RATE ) ) != 0 )
 		goto err;
-	}
 
 	/* Transmit packet */
 	if ( ( rc = netdev->op->transmit ( netdev, iobuf ) ) != 0 )
@@ -350,11 +402,24 @@ void netdev_tx_complete_err ( struct net_device *netdev,
 	list_del ( &iobuf->list );
 	netdev_tx_err ( netdev, iobuf, rc );
 
-	/* Transmit first pending packet, if any */
-	if ( ( iobuf = list_first_entry ( &netdev->tx_deferred,
-					  struct io_buffer, list ) ) != NULL ) {
+	/* Handle pending transmit queue */
+	while ( ( iobuf = list_first_entry ( &netdev->tx_deferred,
+					     struct io_buffer, list ) ) ) {
+
+		/* Remove from pending transmit queue */
 		list_del ( &iobuf->list );
+
+		/* When any transmit completion fails, cancel all
+		 * pending transmissions.
+		 */
+		if ( rc != 0 ) {
+			netdev_tx_err ( netdev, iobuf, -ECANCELED );
+			continue;
+		}
+
+		/* Otherwise, attempt to transmit the first pending packet */
 		netdev_tx ( netdev, iobuf );
+		break;
 	}
 }
 
@@ -403,14 +468,14 @@ static void netdev_tx_flush ( struct net_device *netdev ) {
  * function takes ownership of the I/O buffer.
  */
 void netdev_rx ( struct net_device *netdev, struct io_buffer *iobuf ) {
+	int rc;
 
 	DBGC2 ( netdev, "NETDEV %s received %p (%p+%zx)\n",
 		netdev->name, iobuf, iobuf->data, iob_len ( iobuf ) );
 
 	/* Discard packet (for test purposes) if applicable */
-	if ( ( NETDEV_DISCARD_RATE > 0 ) &&
-	     ( ( random() % NETDEV_DISCARD_RATE ) == 0 ) ) {
-		netdev_rx_err ( netdev, iobuf, -EAGAIN );
+	if ( ( rc = inject_fault ( NETDEV_DISCARD_RATE ) ) != 0 ) {
+		netdev_rx_err ( netdev, iobuf, rc );
 		return;
 	}
 
@@ -538,7 +603,8 @@ static struct interface_descriptor netdev_config_desc =
 static void free_netdev ( struct refcnt *refcnt ) {
 	struct net_device *netdev =
 		container_of ( refcnt, struct net_device, refcnt );
-	
+
+	stop_timer ( &netdev->link_block );
 	netdev_tx_flush ( netdev );
 	netdev_rx_flush ( netdev );
 	clear_settings ( netdev_settings ( netdev ) );
@@ -568,6 +634,8 @@ struct net_device * alloc_netdev ( size_t priv_len ) {
 	if ( netdev ) {
 		ref_init ( &netdev->refcnt, free_netdev );
 		netdev->link_rc = -EUNKNOWN_LINK_STATUS;
+		timer_init ( &netdev->link_block, netdev_link_block_expired,
+			     &netdev->refcnt );
 		INIT_LIST_HEAD ( &netdev->tx_queue );
 		INIT_LIST_HEAD ( &netdev->tx_deferred );
 		INIT_LIST_HEAD ( &netdev->rx_queue );
@@ -597,23 +665,49 @@ struct net_device * alloc_netdev ( size_t priv_len ) {
  * devices.
  */
 int register_netdev ( struct net_device *netdev ) {
-	static unsigned int ifindex = 0;
 	struct ll_protocol *ll_protocol = netdev->ll_protocol;
 	struct net_driver *driver;
+	struct net_device *duplicate;
 	uint32_t seed;
 	int rc;
-
-	/* Record device index and create device name */
-	netdev->index = ifindex++;
-	if ( netdev->name[0] == '\0' ) {
-		snprintf ( netdev->name, sizeof ( netdev->name ), "net%d",
-			   netdev->index );
-	}
 
 	/* Set initial link-layer address, if not already set */
 	if ( ! netdev_has_ll_addr ( netdev ) ) {
 		ll_protocol->init_addr ( netdev->hw_addr, netdev->ll_addr );
 	}
+
+	/* Set MTU, if not already set */
+	if ( ! netdev->mtu ) {
+		netdev->mtu = ( netdev->max_pkt_len -
+				ll_protocol->ll_header_len );
+	}
+
+	/* Reject network devices that are already available via a
+	 * different hardware device.
+	 */
+	duplicate = find_netdev_by_ll_addr ( ll_protocol, netdev->ll_addr );
+	if ( duplicate && ( duplicate->dev != netdev->dev ) ) {
+		DBGC ( netdev, "NETDEV rejecting duplicate (phys %s) of %s "
+		       "(phys %s)\n", netdev->dev->name, duplicate->name,
+		       duplicate->dev->name );
+		rc = -EEXIST;
+		goto err_duplicate;
+	}
+
+	/* Reject named network devices that already exist */
+	if ( netdev->name[0] && ( duplicate = find_netdev ( netdev->name ) ) ) {
+		DBGC ( netdev, "NETDEV rejecting duplicate name %s\n",
+		       duplicate->name );
+		rc = -EEXIST;
+		goto err_duplicate;
+	}
+
+	/* Record device index and create device name */
+	if ( netdev->name[0] == '\0' ) {
+		snprintf ( netdev->name, sizeof ( netdev->name ), "net%d",
+			   netdev_index );
+	}
+	netdev->index = ++netdev_index;
 
 	/* Use least significant bits of the link-layer address to
 	 * improve the randomness of the (non-cryptographic) random
@@ -658,6 +752,9 @@ int register_netdev ( struct net_device *netdev ) {
 	clear_settings ( netdev_settings ( netdev ) );
 	unregister_settings ( netdev_settings ( netdev ) );
  err_register_settings:
+	list_del ( &netdev->list );
+	netdev_put ( netdev );
+ err_duplicate:
 	return rc;
 }
 
@@ -764,6 +861,10 @@ void unregister_netdev ( struct net_device *netdev ) {
 	DBGC ( netdev, "NETDEV %s unregistered\n", netdev->name );
 	list_del ( &netdev->list );
 	netdev_put ( netdev );
+
+	/* Reset network device index if no devices remain */
+	if ( list_empty ( &net_devices ) )
+		netdev_index = 0;
 }
 
 /** Enable or disable interrupts
@@ -773,12 +874,9 @@ void unregister_netdev ( struct net_device *netdev ) {
  */
 void netdev_irq ( struct net_device *netdev, int enable ) {
 
-	/* Do nothing if device does not support interrupts */
-	if ( ! netdev_irq_supported ( netdev ) )
-		return;
-
-	/* Enable or disable device interrupts */
-	netdev->op->irq ( netdev, enable );
+	/* Enable or disable device interrupts, if applicable */
+	if ( netdev_irq_supported ( netdev ) )
+		netdev->op->irq ( netdev, enable );
 
 	/* Record interrupt enabled state */
 	netdev->state &= ~NETDEV_IRQ_ENABLED;
@@ -844,6 +942,27 @@ struct net_device * find_netdev_by_location ( unsigned int bus_type,
 	}
 
 	return NULL;	
+}
+
+/**
+ * Get network device by link-layer address
+ *
+ * @v ll_protocol	Link-layer protocol
+ * @v ll_addr		Link-layer address
+ * @ret netdev		Network device, or NULL
+ */
+struct net_device * find_netdev_by_ll_addr ( struct ll_protocol *ll_protocol,
+					     const void *ll_addr ) {
+	struct net_device *netdev;
+
+	list_for_each_entry ( netdev, &net_devices, list ) {
+		if ( ( netdev->ll_protocol == ll_protocol ) &&
+		     ( memcmp ( netdev->ll_addr, ll_addr,
+				ll_protocol->ll_addr_len ) == 0 ) )
+			return netdev;
+	}
+
+	return NULL;
 }
 
 /**
@@ -1007,15 +1126,35 @@ __weak unsigned int vlan_tag ( struct net_device *netdev __unused ) {
 }
 
 /**
- * Identify VLAN device (when VLAN support is not present)
+ * Add VLAN tag-stripped packet to queue (when VLAN support is not present)
  *
- * @v trunk		Trunk network device
- * @v tag		VLAN tag
- * @ret netdev		VLAN device, if any
+ * @v netdev		Network device
+ * @v tag		VLAN tag, or zero
+ * @v iobuf		I/O buffer
  */
-__weak struct net_device * vlan_find ( struct net_device *trunk __unused,
-				       unsigned int tag __unused ) {
-	return NULL;
+__weak void vlan_netdev_rx ( struct net_device *netdev, unsigned int tag,
+			     struct io_buffer *iobuf ) {
+
+	if ( tag == 0 ) {
+		netdev_rx ( netdev, iobuf );
+	} else {
+		netdev_rx_err ( netdev, iobuf, -ENODEV );
+	}
+}
+
+/**
+ * Discard received VLAN tag-stripped packet (when VLAN support is not present)
+ *
+ * @v netdev		Network device
+ * @v tag		VLAN tag, or zero
+ * @v iobuf		I/O buffer, or NULL
+ * @v rc		Packet status code
+ */
+__weak void vlan_netdev_rx_err ( struct net_device *netdev,
+				 unsigned int tag __unused,
+				 struct io_buffer *iobuf, int rc ) {
+
+	netdev_rx_err ( netdev, iobuf, rc );
 }
 
 /** Networking stack process */
@@ -1039,7 +1178,7 @@ static unsigned int net_discard ( void ) {
 
 			/* Discard first deferred packet */
 			list_del ( &iobuf->list );
-			free ( iobuf );
+			free_iob ( iobuf );
 
 			/* Report discard */
 			discarded++;

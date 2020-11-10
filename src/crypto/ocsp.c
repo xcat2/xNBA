@@ -145,7 +145,7 @@ static void ocsp_free ( struct refcnt *refcnt ) {
 static int ocsp_request ( struct ocsp_check *ocsp ) {
 	struct digest_algorithm *digest = &ocsp_digest_algorithm;
 	struct asn1_builder *builder = &ocsp->request.builder;
-	struct asn1_cursor *cert_id = &ocsp->request.cert_id;
+	struct asn1_cursor *cert_id_tail = &ocsp->request.cert_id_tail;
 	uint8_t digest_ctx[digest->ctxsize];
 	uint8_t name_digest[digest->digestsize];
 	uint8_t pubkey_digest[digest->digestsize];
@@ -186,12 +186,14 @@ static int ocsp_request ( struct ocsp_check *ocsp ) {
 	DBGC2_HDA ( ocsp, 0, builder->data, builder->len );
 
 	/* Parse certificate ID for comparison with response */
-	cert_id->data = builder->data;
-	cert_id->len = builder->len;
-	if ( ( rc = ( asn1_enter ( cert_id, ASN1_SEQUENCE ),
-		      asn1_enter ( cert_id, ASN1_SEQUENCE ),
-		      asn1_enter ( cert_id, ASN1_SEQUENCE ),
-		      asn1_enter ( cert_id, ASN1_SEQUENCE ) ) ) != 0 ) {
+	cert_id_tail->data = builder->data;
+	cert_id_tail->len = builder->len;
+	if ( ( rc = ( asn1_enter ( cert_id_tail, ASN1_SEQUENCE ),
+		      asn1_enter ( cert_id_tail, ASN1_SEQUENCE ),
+		      asn1_enter ( cert_id_tail, ASN1_SEQUENCE ),
+		      asn1_enter ( cert_id_tail, ASN1_SEQUENCE ),
+		      asn1_enter ( cert_id_tail, ASN1_SEQUENCE ),
+		      asn1_skip ( cert_id_tail, ASN1_SEQUENCE ) ) ) != 0 ) {
 		DBGC ( ocsp, "OCSP %p \"%s\" could not locate certID: %s\n",
 		       ocsp, x509_name ( ocsp->cert ), strerror ( rc ) );
 		return rc;
@@ -209,10 +211,10 @@ static int ocsp_request ( struct ocsp_check *ocsp ) {
 static int ocsp_uri_string ( struct ocsp_check *ocsp ) {
 	struct x509_ocsp_responder *responder =
 		&ocsp->cert->extensions.auth_info.ocsp;
-	struct uri path_uri;
-	char *path_base64_string;
-	char *path_uri_string;
-	size_t path_len;
+	char *base64;
+	char *sep;
+	size_t base64_len;
+	size_t uri_len;
 	size_t len;
 	int rc;
 
@@ -224,46 +226,44 @@ static int ocsp_uri_string ( struct ocsp_check *ocsp ) {
 		goto err_no_uri;
 	}
 
-	/* Base64-encode the request as the URI path */
-	path_len = ( base64_encoded_len ( ocsp->request.builder.len )
-		     + 1 /* NUL */ );
-	path_base64_string = malloc ( path_len );
-	if ( ! path_base64_string ) {
+	/* Calculate base64-encoded request length */
+	base64_len = ( base64_encoded_len ( ocsp->request.builder.len )
+		       + 1 /* NUL */ );
+
+	/* Allocate and construct the base64-encoded request */
+	base64 = malloc ( base64_len );
+	if ( ! base64 ) {
 		rc = -ENOMEM;
-		goto err_path_base64;
+		goto err_alloc_base64;
 	}
 	base64_encode ( ocsp->request.builder.data, ocsp->request.builder.len,
-			path_base64_string );
+			base64, base64_len );
 
-	/* URI-encode the Base64-encoded request */
-	memset ( &path_uri, 0, sizeof ( path_uri ) );
-	path_uri.path = path_base64_string;
-	path_uri_string = format_uri_alloc ( &path_uri );
-	if ( ! path_uri_string ) {
-		rc = -ENOMEM;
-		goto err_path_uri;
-	}
+	/* Calculate URI-encoded base64-encoded request length */
+	uri_len = ( uri_encode ( URI_PATH, base64, ( base64_len - 1 /* NUL */ ),
+				 NULL, 0 ) + 1 /* NUL */ );
 
-	/* Construct URI string */
-	len = ( responder->uri.len + strlen ( path_uri_string ) + 1 /* NUL */ );
+	/* Allocate and construct the URI string */
+	len = ( responder->uri.len + 1 /* possible "/" */ + uri_len );
 	ocsp->uri_string = zalloc ( len );
 	if ( ! ocsp->uri_string ) {
 		rc = -ENOMEM;
-		goto err_ocsp_uri;
+		goto err_alloc_uri;
 	}
 	memcpy ( ocsp->uri_string, responder->uri.data, responder->uri.len );
-	strcpy ( &ocsp->uri_string[responder->uri.len], path_uri_string );
+	sep = &ocsp->uri_string[ responder->uri.len - 1 ];
+	if ( *sep != '/' )
+		*(++sep) = '/';
+	uri_encode ( URI_PATH, base64, base64_len, ( sep + 1 ), uri_len );
 	DBGC2 ( ocsp, "OCSP %p \"%s\" URI is %s\n",
 		ocsp, x509_name ( ocsp->cert ), ocsp->uri_string );
 
 	/* Success */
 	rc = 0;
 
- err_ocsp_uri:
-	free ( path_uri_string );
- err_path_uri:
-	free ( path_base64_string );
- err_path_base64:
+ err_alloc_uri:
+	free ( base64 );
+ err_alloc_base64:
  err_no_uri:
 	return rc;
 }
@@ -284,7 +284,7 @@ int ocsp_check ( struct x509_certificate *cert,
 	/* Sanity checks */
 	assert ( cert != NULL );
 	assert ( issuer != NULL );
-	assert ( issuer->valid );
+	assert ( x509_is_valid ( issuer ) );
 
 	/* Allocate and initialise check */
 	*ocsp = zalloc ( sizeof ( **ocsp ) );
@@ -405,12 +405,17 @@ static int ocsp_compare_responder_name ( struct ocsp_check *ocsp,
 static int ocsp_compare_responder_key_hash ( struct ocsp_check *ocsp,
 					     struct x509_certificate *cert ) {
 	struct ocsp_responder *responder = &ocsp->response.responder;
+	struct asn1_cursor key_hash;
 	uint8_t ctx[SHA1_CTX_SIZE];
 	uint8_t digest[SHA1_DIGEST_SIZE];
 	int difference;
 
+	/* Enter responder key hash */
+	memcpy ( &key_hash, &responder->id, sizeof ( key_hash ) );
+	asn1_enter ( &key_hash, ASN1_OCTET_STRING );
+
 	/* Sanity check */
-	difference = ( sizeof ( digest ) - responder->id.len );
+	difference = ( sizeof ( digest ) - key_hash.len );
 	if ( difference )
 		return difference;
 
@@ -421,8 +426,8 @@ static int ocsp_compare_responder_key_hash ( struct ocsp_check *ocsp,
 			cert->subject.public_key.raw_bits.len );
 	digest_final ( &sha1_algorithm, ctx, digest );
 
-	/* Compare responder ID with SHA1 hash of certificate's public key */
-	return memcmp ( digest, responder->id.data, sizeof ( digest ) );
+	/* Compare responder key hash with hash of certificate's public key */
+	return memcmp ( digest, key_hash.data, sizeof ( digest ) );
 }
 
 /**
@@ -471,17 +476,43 @@ static int ocsp_parse_responder_id ( struct ocsp_check *ocsp,
  */
 static int ocsp_parse_cert_id ( struct ocsp_check *ocsp,
 				const struct asn1_cursor *raw ) {
+	static struct asn1_cursor algorithm = {
+		.data = ocsp_algorithm_id,
+		.len = sizeof ( ocsp_algorithm_id ),
+	};
+	struct asn1_cursor cert_id;
 	struct asn1_cursor cursor;
+	int rc;
 
-	/* Check certID matches request */
-	memcpy ( &cursor, raw, sizeof ( cursor ) );
-	asn1_shrink_any ( &cursor );
-	if ( asn1_compare ( &cursor, &ocsp->request.cert_id ) != 0 ) {
+	/* Enter cert ID */
+	memcpy ( &cert_id, raw, sizeof ( cert_id ) );
+	asn1_enter ( &cert_id, ASN1_SEQUENCE );
+
+	/* Check certID algorithm (but not parameters) */
+	memcpy ( &cursor, &cert_id, sizeof ( cursor ) );
+	if ( ( rc = ( asn1_enter ( &cursor, ASN1_SEQUENCE ),
+		      asn1_shrink ( &cursor, ASN1_OID ),
+		      asn1_shrink ( &algorithm, ASN1_OID ) ) ) != 0 ) {
+		DBGC ( ocsp, "OCSP %p \"%s\" certID missing algorithm:\n",
+		       ocsp, x509_name ( ocsp->cert ) );
+		DBGC_HDA ( ocsp, 0, cursor.data, cursor.len );
+		return -EACCES_CERT_MISMATCH;
+	}
+	if ( asn1_compare ( &cursor, &algorithm ) != 0 ) {
+		DBGC ( ocsp, "OCSP %p \"%s\" certID wrong algorithm:\n",
+		       ocsp, x509_name ( ocsp->cert ) );
+		DBGC_HDA ( ocsp, 0, cursor.data, cursor.len );
+		return -EACCES_CERT_MISMATCH;
+	}
+
+	/* Check remaining certID fields */
+	asn1_skip ( &cert_id, ASN1_SEQUENCE );
+	if ( asn1_compare ( &cert_id, &ocsp->request.cert_id_tail ) != 0 ) {
 		DBGC ( ocsp, "OCSP %p \"%s\" certID mismatch:\n",
 		       ocsp, x509_name ( ocsp->cert ) );
-		DBGC_HDA ( ocsp, 0, ocsp->request.cert_id.data,
-			   ocsp->request.cert_id.len );
-		DBGC_HDA ( ocsp, 0, cursor.data, cursor.len );
+		DBGC_HDA ( ocsp, 0, ocsp->request.cert_id_tail.data,
+			   ocsp->request.cert_id_tail.len );
+		DBGC_HDA ( ocsp, 0, cert_id.data, cert_id.len );
 		return -EACCES_CERT_MISMATCH;
 	}
 

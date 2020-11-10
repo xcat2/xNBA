@@ -9,6 +9,7 @@ ASFLAGS		:=
 LDFLAGS		:=
 HOST_CFLAGS	:=
 MAKEDEPS	:= Makefile
+CROSS_COMPILE	?= $(CROSS)
 
 ###############################################################################
 #
@@ -46,14 +47,13 @@ ZBIN		:= ./util/zbin
 ELF2EFI32	:= ./util/elf2efi32
 ELF2EFI64	:= ./util/elf2efi64
 EFIROM		:= ./util/efirom
+EFIFATBIN	:= ./util/efifatbin
 ICCFIX		:= ./util/iccfix
 EINFO		:= ./util/einfo
 GENKEYMAP	:= ./util/genkeymap.pl
 DOXYGEN		:= doxygen
 LCAB		:= lcab
-BINUTILS_DIR	:= /usr
-BFD_DIR		:= $(BINUTILS_DIR)
-ZLIB_DIR	:= /usr
+QEMUIMG		:= qemu-img
 
 ###############################################################################
 #
@@ -62,7 +62,7 @@ ZLIB_DIR	:= /usr
 SRCDIRS		:=
 SRCDIRS		+= libgcc
 SRCDIRS		+= core
-SRCDIRS		+= net net/oncrpc net/tcp net/udp net/infiniband net/80211
+SRCDIRS		+= net net/tcp net/udp net/infiniband
 SRCDIRS		+= image
 SRCDIRS		+= drivers/bus
 SRCDIRS		+= drivers/net
@@ -71,26 +71,46 @@ SRCDIRS		+= drivers/net/e1000e
 SRCDIRS		+= drivers/net/igb
 SRCDIRS		+= drivers/net/igbvf
 SRCDIRS		+= drivers/net/phantom
-SRCDIRS		+= drivers/net/rtl818x
-SRCDIRS		+= drivers/net/ath
-SRCDIRS		+= drivers/net/ath/ath5k
-SRCDIRS		+= drivers/net/ath/ath9k
 SRCDIRS		+= drivers/net/vxge
 SRCDIRS		+= drivers/net/efi
 SRCDIRS		+= drivers/net/tg3
+SRCDIRS		+= drivers/net/bnxt
+SRCDIRS		+= drivers/net/sfc
 SRCDIRS		+= drivers/block
 SRCDIRS		+= drivers/nvs
 SRCDIRS		+= drivers/bitbash
 SRCDIRS		+= drivers/infiniband
+SRCDIRS		+= drivers/infiniband/mlx_utils_flexboot/src
+SRCDIRS		+= drivers/infiniband/mlx_utils/src/public
+SRCDIRS		+= drivers/infiniband/mlx_utils/mlx_lib/mlx_reg_access
+SRCDIRS		+= drivers/infiniband/mlx_utils/mlx_lib/mlx_nvconfig
+SRCDIRS		+= drivers/infiniband/mlx_utils/mlx_lib/mlx_vmac
+SRCDIRS		+= drivers/infiniband/mlx_utils/mlx_lib/mlx_blink_leds
+SRCDIRS		+= drivers/infiniband/mlx_utils/mlx_lib/mlx_link_speed
+SRCDIRS		+= drivers/infiniband/mlx_utils/mlx_lib/mlx_mtu
+SRCDIRS		+= drivers/infiniband/mlx_nodnic/src
+SRCDIRS		+= drivers/usb
 SRCDIRS		+= interface/pxe interface/efi interface/smbios
 SRCDIRS		+= interface/bofm
+SRCDIRS		+= interface/xen
+SRCDIRS		+= interface/hyperv
 SRCDIRS		+= tests
-SRCDIRS		+= crypto crypto/axtls crypto/matrixssl
+SRCDIRS		+= crypto crypto/mishmash
 SRCDIRS		+= hci hci/commands hci/tui
 SRCDIRS		+= hci/mucurses hci/mucurses/widgets
 SRCDIRS		+= hci/keymap
 SRCDIRS		+= usr
 SRCDIRS		+= config
+
+# These directories contain code that is not eligible for UEFI Secure
+# Boot signing.
+#
+SRCDIRS_INSEC	+= net/oncrpc
+SRCDIRS_INSEC	+= net/80211
+SRCDIRS_INSEC	+= drivers/net/rtl818x
+SRCDIRS_INSEC	+= drivers/net/ath
+SRCDIRS_INSEC	+= drivers/net/ath/ath5k
+SRCDIRS_INSEC	+= drivers/net/ath/ath9k
 
 # NON_AUTO_SRCS lists files that are excluded from the normal
 # automatic build system.
@@ -146,6 +166,10 @@ all : $(ALL)
 #
 everything :
 	$(Q)$(MAKE) --no-print-directory $(ALL) \
+		bin/3c509.rom bin/intel.rom bin/intel.mrom \
+		bin-x86_64-pcbios/8086100e.mrom bin-x86_64-pcbios/intel.rom \
+		bin-x86_64-pcbios/ipxe.usb bin-x86_64-pcbios/ipxe.pxe \
+		bin-x86_64-pcbios/undionly.kpxe \
 		bin-i386-efi/ipxe.efi bin-i386-efi/ipxe.efidrv \
 		bin-i386-efi/ipxe.efirom \
 		bin-x86_64-efi/ipxe.efi bin-x86_64-efi/ipxe.efidrv \
@@ -184,18 +208,44 @@ install :
 #
 # Version number calculations
 #
+ifneq ($(wildcard ../.git),)
+VERSIONS := $(shell git describe --tags --always --long --abbrev=1 --match "v*")
+VERSION_TUPLE	:= $(subst ., ,$(subst -, ,$(patsubst v%,%,$(VERSIONS))))
+VERSION_MAJOR	:= $(word 1,$(VERSION_TUPLE))
+VERSION_MINOR	:= $(word 2,$(VERSION_TUPLE))
+VERSION_PATCH	:= $(word 3,$(VERSION_TUPLE))
+ifeq ($(word 4,$(VERSION_TUPLE)),0)
+EXTRAVERSION	:=
+else
+EXTRAVERSION	:= +
+endif
+GITVERSION	= $(word 5,$(VERSION_TUPLE))
+else
 VERSION_MAJOR	= 1
 VERSION_MINOR	= 0
-VERSION_PATCH	= 3
-EXTRAVERSION	= -$(shell date +%y%m%d)
+VERSION_PATCH	= 0
+EXTRAVERSION	= +
+endif
 MM_VERSION	= $(VERSION_MAJOR).$(VERSION_MINOR)
 VERSION		= $(MM_VERSION).$(VERSION_PATCH)$(EXTRAVERSION)
-GITVERSION := $(shell git describe --always --abbrev=1 --match "" 2>/dev/null)
 ifneq ($(GITVERSION),)
 VERSION		+= ($(GITVERSION))
 endif
 version :
 	@$(ECHO) "$(VERSION)"
+
+###############################################################################
+#
+# Predefined build shortcuts (for e.g. bin/ipxe.iso)
+
+# All drivers (excluding USB)
+#
+DRIVERS_ipxe	= $(DRIVERS_net) $(DRIVERS_infiniband) \
+		  $(DRIVERS_xen) $(DRIVERS_hyperv)
+
+# Raspberry Pi
+#
+DRIVERS_rpi	= smsc95xx lan78xx
 
 ###############################################################################
 #

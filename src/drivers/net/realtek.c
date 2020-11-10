@@ -17,9 +17,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <string.h>
@@ -194,7 +198,6 @@ static int realtek_init_eeprom ( struct net_device *netdev ) {
 		DBGC ( rtl, "REALTEK %p EEPROM is a 93C46\n", rtl );
 		init_at93c46 ( &rtl->eeprom, 16 );
 	}
-	rtl->eeprom.bus = &rtl->spibit.bus;
 
 	/* Check for EEPROM presence.  Some onboard NICs will have no
 	 * EEPROM connected, with the BIOS being responsible for
@@ -239,12 +242,15 @@ static int realtek_init_eeprom ( struct net_device *netdev ) {
 /**
  * Read from MII register
  *
- * @v mii		MII interface
+ * @v mdio		MII interface
+ * @v phy		PHY address
  * @v reg		Register address
  * @ret value		Data read, or negative error
  */
-static int realtek_mii_read ( struct mii_interface *mii, unsigned int reg ) {
-	struct realtek_nic *rtl = container_of ( mii, struct realtek_nic, mii );
+static int realtek_mii_read ( struct mii_interface *mdio,
+			      unsigned int phy __unused, unsigned int reg ) {
+	struct realtek_nic *rtl =
+		container_of ( mdio, struct realtek_nic, mdio );
 	unsigned int i;
 	uint32_t value;
 
@@ -276,14 +282,17 @@ static int realtek_mii_read ( struct mii_interface *mii, unsigned int reg ) {
 /**
  * Write to MII register
  *
- * @v mii		MII interface
+ * @v mdio		MII interface
+ * @v phy		PHY address
  * @v reg		Register address
  * @v data		Data to write
  * @ret rc		Return status code
  */
-static int realtek_mii_write ( struct mii_interface *mii, unsigned int reg,
-			       unsigned int data) {
-	struct realtek_nic *rtl = container_of ( mii, struct realtek_nic, mii );
+static int realtek_mii_write ( struct mii_interface *mdio,
+			       unsigned int phy __unused, unsigned int reg,
+			       unsigned int data ) {
+	struct realtek_nic *rtl =
+		container_of ( mdio, struct realtek_nic, mdio );
 	unsigned int i;
 
 	/* Fail if PHYAR register is not present */
@@ -1085,6 +1094,7 @@ static void realtek_detect ( struct realtek_nic *rtl ) {
 			       rtl );
 			rtl->legacy = 1;
 		}
+		rtl->eeprom.bus = &rtl->spibit.bus;
 	}
 }
 
@@ -1118,7 +1128,11 @@ static int realtek_probe ( struct pci_device *pci ) {
 	adjust_pci_device ( pci );
 
 	/* Map registers */
-	rtl->regs = ioremap ( pci->membase, RTL_BAR_SIZE );
+	rtl->regs = pci_ioremap ( pci, pci->membase, RTL_BAR_SIZE );
+	if ( ! rtl->regs ) {
+		rc = -ENODEV;
+		goto err_ioremap;
+	}
 
 	/* Reset the NIC */
 	if ( ( rc = realtek_reset ( rtl ) ) != 0 )
@@ -1128,7 +1142,8 @@ static int realtek_probe ( struct pci_device *pci ) {
 	realtek_detect ( rtl );
 
 	/* Initialise EEPROM */
-	if ( ( rc = realtek_init_eeprom ( netdev ) ) == 0 ) {
+	if ( rtl->eeprom.bus &&
+	     ( ( rc = realtek_init_eeprom ( netdev ) ) == 0 ) ) {
 
 		/* Read MAC address from EEPROM */
 		if ( ( rc = nvs_read ( &rtl->eeprom.nvs, RTL_EEPROM_MAC,
@@ -1149,7 +1164,8 @@ static int realtek_probe ( struct pci_device *pci ) {
 	}
 
 	/* Initialise and reset MII interface */
-	mii_init ( &rtl->mii, &realtek_mii_operations );
+	mdio_init ( &rtl->mdio, &realtek_mii_operations );
+	mii_init ( &rtl->mii, &rtl->mdio, 0 );
 	if ( ( rc = realtek_phy_reset ( rtl ) ) != 0 )
 		goto err_phy_reset;
 
@@ -1177,6 +1193,7 @@ static int realtek_probe ( struct pci_device *pci ) {
 	realtek_reset ( rtl );
  err_reset:
 	iounmap ( rtl->regs );
+ err_ioremap:
 	netdev_nullify ( netdev );
 	netdev_put ( netdev );
  err_alloc:

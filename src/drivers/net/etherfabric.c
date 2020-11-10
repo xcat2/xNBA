@@ -3176,7 +3176,7 @@ falcon_probe_nic_variant ( struct efab_nic *efab, struct pci_device *pci )
 	uint8_t revision;
 
 	/* PCI revision */
-	pci_read_config_byte ( pci, PCI_CLASS_REVISION, &revision );
+	pci_read_config_byte ( pci, PCI_REVISION, &revision );
 	efab->pci_revision = revision;
 
 	/* Asic vs FPGA */
@@ -4006,7 +4006,7 @@ efab_init_mac ( struct efab_nic *efab )
 		 * because we want to use it, or because we're about
 		 * to reset the mac anyway
 		 */
-		sleep ( 2 );
+		mdelay ( 2000 );
 
 		if ( ! efab->link_up ) {
 			EFAB_ERR ( "!\n" );
@@ -4150,7 +4150,7 @@ efab_probe ( struct pci_device *pci )
 	/* Get iobase/membase */
 	mmio_start = pci_bar_start ( pci, PCI_BASE_ADDRESS_2 );
 	mmio_len = pci_bar_size ( pci, PCI_BASE_ADDRESS_2 );
-	efab->membase = ioremap ( mmio_start, mmio_len );
+	efab->membase = pci_ioremap ( pci, mmio_start, mmio_len );
 	EFAB_TRACE ( "BAR of %lx bytes at phys %lx mapped at %p\n",
 		     mmio_len, mmio_start, efab->membase );
 

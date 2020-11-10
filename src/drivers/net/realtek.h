@@ -7,7 +7,7 @@
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <ipxe/spi.h>
 #include <ipxe/spi_bit.h>
@@ -283,7 +283,9 @@ struct realtek_nic {
 	/** Non-volatile options */
 	struct nvo_block nvo;
 	/** MII interface */
-	struct mii_interface mii;
+	struct mii_interface mdio;
+	/** MII device */
+	struct mii_device mii;
 
 	/** Legacy datapath mode */
 	int legacy;

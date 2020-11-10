@@ -7,15 +7,15 @@ CFLAGS		+= -fstrength-reduce -fomit-frame-pointer
 #
 CFLAGS		+= -falign-jumps=1 -falign-loops=1 -falign-functions=1
 
-# Use %rip-relative addressing wherever possible.
-#
-CFLAGS		+= -fpie
-
 # Force 64-bit code
 #
 CFLAGS		+= -m64
 ASFLAGS		+= --64
 LDFLAGS		+= -m elf_x86_64
+
+# Prevent use of MMX and SSE registers
+#
+CFLAGS		+= -mno-mmx -mno-sse
 
 # EFI requires -fshort-wchar, and nothing else currently uses wchar_t
 #
@@ -40,6 +40,7 @@ endif
 
 # x86_64-specific directories containing source files
 #
+SRCDIRS		+= arch/x86_64/core
 SRCDIRS		+= arch/x86_64/prefix
 
 # Include common x86 Makefile

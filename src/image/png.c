@@ -15,9 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -920,9 +924,9 @@ static int png_pixbuf ( struct image *image, struct pixel_buffer **pixbuf ) {
 
 		/* Extract chunk header */
 		remaining = ( image->len - png->offset );
-		if ( remaining < sizeof ( header ) ) {
-			DBGC ( image, "PNG %s truncated chunk header at offset "
-			       "%zd\n", image->name, png->offset );
+		if ( remaining < ( sizeof ( header ) + sizeof ( footer ) ) ) {
+			DBGC ( image, "PNG %s truncated chunk header/footer "
+			       "at offset %zd\n", image->name, png->offset );
 			rc = -EINVAL;
 			goto err_truncated;
 		}
@@ -932,10 +936,10 @@ static int png_pixbuf ( struct image *image, struct pixel_buffer **pixbuf ) {
 
 		/* Validate chunk length */
 		chunk_len = ntohl ( header.len );
-		if ( remaining < ( sizeof ( header ) + chunk_len +
+		if ( chunk_len > ( remaining - sizeof ( header ) -
 				   sizeof ( footer ) ) ) {
-			DBGC ( image, "PNG %s truncated chunk data/footer at "
-			       "offset %zd\n", image->name, png->offset );
+			DBGC ( image, "PNG %s truncated chunk data at offset "
+			       "%zd\n", image->name, png->offset );
 			rc = -EINVAL;
 			goto err_truncated;
 		}

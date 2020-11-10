@@ -6,7 +6,7 @@
  * EFI driver interface
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <ipxe/device.h>
 #include <ipxe/tables.h>
@@ -19,7 +19,7 @@ struct efi_device {
 	struct device dev;
 	/** EFI device handle */
 	EFI_HANDLE device;
-	/** Device path */
+	/** EFI device path copy */
 	EFI_DEVICE_PATH_PROTOCOL *path;
 	/** Driver for this device */
 	struct efi_driver *driver;
@@ -84,11 +84,7 @@ static inline void * efidev_get_drvdata ( struct efi_device *efidev ) {
 	return efidev->priv;
 }
 
-extern EFI_DEVICE_PATH_PROTOCOL *
-efi_devpath_end ( EFI_DEVICE_PATH_PROTOCOL *path );
 extern struct efi_device * efidev_parent ( struct device *dev );
-extern int efidev_child_add ( struct efi_device *efidev, EFI_HANDLE device );
-extern void efidev_child_del ( struct efi_device *efidev, EFI_HANDLE device );
 extern int efi_driver_install ( void );
 extern void efi_driver_uninstall ( void );
 extern int efi_driver_connect_all ( void );

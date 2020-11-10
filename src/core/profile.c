@@ -15,13 +15,18 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <stdio.h>
 #include <strings.h>
+#include <limits.h>
 #include <assert.h>
 #include <ipxe/isqrt.h>
 #include <ipxe/profile.h>
@@ -118,8 +123,9 @@ void profile_update ( struct profiler *profiler, unsigned long sample ) {
 	 */
 	assert ( ( ( signed ) sample ) >= 0 );
 
-	/* Update sample count */
-	profiler->count++;
+	/* Update sample count, limiting to avoid signed overflow */
+	if ( profiler->count < INT_MAX )
+		profiler->count++;
 
 	/* Adjust mean sample value scale if necessary.  Skip if
 	 * sample is zero (in which case flsl(sample)-1 would

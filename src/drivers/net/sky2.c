@@ -246,7 +246,7 @@ static void sky2_power_aux(struct sky2_hw *hw)
 			    Y2_COR_CLK_LNK2_DIS | Y2_CLK_GAT_LNK2_DIS);
 
 	/* switch power to VAUX */
-	if (sky2_read16(hw, B0_CTST) & Y2_VAUX_AVAIL)
+	if (sky2_read32(hw, B0_CTST) & Y2_VAUX_AVAIL)
 		sky2_write8(hw, B0_POWER_CTRL,
 			    (PC_VAUX_ENA | PC_VCC_ENA |
 			     PC_VAUX_ON | PC_VCC_OFF));
@@ -2278,7 +2278,7 @@ static int sky2_probe(struct pci_device *pdev)
 
 	hw->pdev = pdev;
 
-	hw->regs = (unsigned long)ioremap(pci_bar_start(pdev, PCI_BASE_ADDRESS_0), 0x4000);
+	hw->regs = (unsigned long)pci_ioremap(pdev, pci_bar_start(pdev, PCI_BASE_ADDRESS_0), 0x4000);
 	if (!hw->regs) {
 		DBG(PFX "cannot map device registers\n");
 		goto err_out_free_hw;

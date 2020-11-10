@@ -7,7 +7,7 @@
  * Transport Layer Security Protocol
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <ipxe/refcnt.h>
@@ -20,6 +20,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/x509.h>
 #include <ipxe/pending.h>
 #include <ipxe/iobuf.h>
+#include <ipxe/tables.h>
 
 /** A TLS header */
 struct tls_header {
@@ -62,6 +63,7 @@ struct tls_header {
 #define TLS_HELLO_REQUEST 0
 #define TLS_CLIENT_HELLO 1
 #define TLS_SERVER_HELLO 2
+#define TLS_NEW_SESSION_TICKET 4
 #define TLS_CERTIFICATE 11
 #define TLS_SERVER_KEY_EXCHANGE 12
 #define TLS_CERTIFICATE_REQUEST 13
@@ -85,7 +87,10 @@ struct tls_header {
 /* TLS hash algorithm identifiers */
 #define TLS_MD5_ALGORITHM 1
 #define TLS_SHA1_ALGORITHM 2
+#define TLS_SHA224_ALGORITHM 3
 #define TLS_SHA256_ALGORITHM 4
+#define TLS_SHA384_ALGORITHM 5
+#define TLS_SHA512_ALGORITHM 6
 
 /* TLS signature algorithm identifiers */
 #define TLS_RSA_ALGORITHM 1
@@ -100,6 +105,23 @@ struct tls_header {
 #define TLS_MAX_FRAGMENT_LENGTH_1024 2
 #define TLS_MAX_FRAGMENT_LENGTH_2048 3
 #define TLS_MAX_FRAGMENT_LENGTH_4096 4
+
+/* TLS signature algorithms extension */
+#define TLS_SIGNATURE_ALGORITHMS 13
+
+/* TLS session ticket extension */
+#define TLS_SESSION_TICKET 35
+
+/* TLS renegotiation information extension */
+#define TLS_RENEGOTIATION_INFO 0xff01
+
+/** TLS verification data */
+struct tls_verify_data {
+	/** Client verification data */
+	uint8_t client[12];
+	/** Server verification data */
+	uint8_t server[12];
+} __attribute__ (( packed ));
 
 /** TLS RX state machine state */
 enum tls_rx_state {
@@ -130,6 +152,14 @@ struct tls_cipher_suite {
 	/** Numeric code (in network-endian order) */
 	uint16_t code;
 };
+
+/** TLS cipher suite table */
+#define TLS_CIPHER_SUITES						\
+	__table ( struct tls_cipher_suite, "tls_cipher_suites" )
+
+/** Declare a TLS cipher suite */
+#define __tls_cipher_suite( pref )					\
+	__table_entry ( TLS_CIPHER_SUITES, pref )
 
 /** A TLS cipher specification */
 struct tls_cipherspec {
@@ -164,6 +194,19 @@ struct tls_signature_hash_algorithm {
 	/** Numeric code */
 	struct tls_signature_hash_id code;
 };
+
+/** TLS signature hash algorithm table
+ *
+ * Note that the default (TLSv1.1 and earlier) algorithm using
+ * MD5+SHA1 is never explicitly specified.
+ */
+#define TLS_SIG_HASH_ALGORITHMS						\
+	__table ( struct tls_signature_hash_algorithm,			\
+		  "tls_sig_hash_algorithms" )
+
+/** Declare a TLS signature hash algorithm */
+#define __tls_sig_hash_algorithm					\
+	__table_entry ( TLS_SIG_HASH_ALGORITHMS, 01 )
 
 /** TLS pre-master secret */
 struct tls_pre_master_secret {
@@ -207,9 +250,44 @@ struct md5_sha1_digest {
 struct tls_session {
 	/** Reference counter */
 	struct refcnt refcnt;
+	/** List of sessions */
+	struct list_head list;
 
 	/** Server name */
 	const char *name;
+	/** Session ID */
+	uint8_t id[32];
+	/** Length of session ID */
+	size_t id_len;
+	/** Session ticket */
+	void *ticket;
+	/** Length of session ticket */
+	size_t ticket_len;
+	/** Master secret */
+	uint8_t master_secret[48];
+
+	/** List of connections */
+	struct list_head conn;
+};
+
+/** A TLS connection */
+struct tls_connection {
+	/** Reference counter */
+	struct refcnt refcnt;
+
+	/** Session */
+	struct tls_session *session;
+	/** List of connections within the same session */
+	struct list_head list;
+	/** Session ID */
+	uint8_t session_id[32];
+	/** Length of session ID */
+	size_t session_id_len;
+	/** New session ticket */
+	void *new_session_ticket;
+	/** Length of new session ticket */
+	size_t new_session_ticket_len;
+
 	/** Plaintext stream */
 	struct interface plainstream;
 	/** Ciphertext stream */
@@ -243,6 +321,10 @@ struct tls_session {
 	uint8_t *handshake_ctx;
 	/** Client certificate (if used) */
 	struct x509_certificate *cert;
+	/** Secure renegotiation flag */
+	int secure_renegotiation;
+	/** Verification data */
+	struct tls_verify_data verify;
 
 	/** Server certificate chain */
 	struct x509_chain *chain;
@@ -253,6 +335,8 @@ struct tls_session {
 	struct pending_operation client_negotiation;
 	/** Server security negotiation pending operation */
 	struct pending_operation server_negotiation;
+	/** Certificate validation pending operation */
+	struct pending_operation validation;
 
 	/** TX sequence number */
 	uint64_t tx_seq;

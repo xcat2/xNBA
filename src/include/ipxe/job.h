@@ -7,7 +7,7 @@
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <ipxe/interface.h>
 
@@ -28,6 +28,8 @@ struct job_progress {
 	 * account before calculating @c completed/total.
 	 */
 	unsigned long total;
+	/** Message (optional) */
+	char message[32];
 };
 
 extern int job_progress ( struct interface *intf,

@@ -7,6 +7,8 @@
  *
  */
 
+FILE_LICENCE ( GPL2_OR_LATER );
+
 #include <ipxe/list.h>
 #include <ipxe/netdevice.h>
 #include <ipxe/efi/efi.h>
@@ -17,6 +19,9 @@
 #include <ipxe/efi/Protocol/HiiConfigAccess.h>
 #include <ipxe/efi/Protocol/HiiDatabase.h>
 #include <ipxe/efi/Protocol/LoadFile.h>
+
+/** SNP transmit completion ring size */
+#define EFI_SNP_NUM_TX 32
 
 /** An SNP device */
 struct efi_snp_device {
@@ -32,20 +37,18 @@ struct efi_snp_device {
 	EFI_SIMPLE_NETWORK_PROTOCOL snp;
 	/** The SNP "mode" (parameters) */
 	EFI_SIMPLE_NETWORK_MODE mode;
-	/** Outstanding TX packet count (via "interrupt status")
-	 *
-	 * Used in order to generate TX completions.
-	 */
-	unsigned int tx_count_interrupts;
-	/** Outstanding TX packet count (via "recycled tx buffers")
-	 *
-	 * Used in order to generate TX completions.
-	 */
-	unsigned int tx_count_txbufs;
-	/** Outstanding RX packet count (via "interrupt status") */
-	unsigned int rx_count_interrupts;
-	/** Outstanding RX packet count (via WaitForPacket event) */
-	unsigned int rx_count_events;
+	/** Started flag */
+	int started;
+	/** Pending interrupt status */
+	unsigned int interrupts;
+	/** Transmit completion ring */
+	VOID *tx[EFI_SNP_NUM_TX];
+	/** Transmit completion ring producer counter */
+	unsigned int tx_prod;
+	/** Transmit completion ring consumer counter */
+	unsigned int tx_cons;
+	/** Receive queue */
+	struct list_head rx;
 	/** The network interface identifier */
 	EFI_NETWORK_INTERFACE_IDENTIFIER_PROTOCOL nii;
 	/** Component name protocol */
@@ -56,6 +59,10 @@ struct efi_snp_device {
 	EFI_HII_CONFIG_ACCESS_PROTOCOL hii;
 	/** HII package list */
 	EFI_HII_PACKAGE_LIST_HEADER *package_list;
+	/** EFI child handle for HII association */
+	EFI_HANDLE hii_child_handle;
+	/** Device path of HII child handle */
+	EFI_DEVICE_PATH_PROTOCOL *hii_child_path;
 	/** HII handle */
 	EFI_HII_HANDLE hii_handle;
 	/** Device name */
@@ -64,17 +71,30 @@ struct efi_snp_device {
 	wchar_t driver_name[16];
 	/** Controller name */
 	wchar_t controller_name[64];
-	/** The device path
-	 *
-	 * This field is variable in size and must appear at the end
-	 * of the structure.
-	 */
-	EFI_DEVICE_PATH_PROTOCOL path;
+	/** The device path */
+	EFI_DEVICE_PATH_PROTOCOL *path;
 };
 
 extern int efi_snp_hii_install ( struct efi_snp_device *snpdev );
-extern void efi_snp_hii_uninstall ( struct efi_snp_device *snpdev );
+extern int efi_snp_hii_uninstall ( struct efi_snp_device *snpdev );
 extern struct efi_snp_device * find_snpdev ( EFI_HANDLE handle );
 extern struct efi_snp_device * last_opened_snpdev ( void );
+extern void efi_snp_add_claim ( int delta );
+
+/**
+ * Claim network devices for use by iPXE
+ *
+ */
+static inline void efi_snp_claim ( void ) {
+	efi_snp_add_claim ( +1 );
+}
+
+/**
+ * Release network devices for use via SNP
+ *
+ */
+static inline void efi_snp_release ( void ) {
+	efi_snp_add_claim ( -1 );
+}
 
 #endif /* _IPXE_EFI_SNP_H */

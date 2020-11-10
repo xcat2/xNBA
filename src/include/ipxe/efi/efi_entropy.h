@@ -3,11 +3,13 @@
 
 /** @file
  *
- *    EFI entropy source
+ * EFI entropy source
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
+
+#include <stdint.h>
 
 #ifdef ENTROPY_EFI
 #define ENTROPY_PREFIX_efi
@@ -15,21 +17,19 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define ENTROPY_PREFIX_efi __efi_
 #endif
 
-static inline __always_inline double
+/**
+ * min-entropy per sample
+ *
+ * @ret min_entropy	min-entropy of each sample
+ */
+static inline __always_inline min_entropy_t
 ENTROPY_INLINE ( efi, min_entropy_per_sample ) ( void ) {
-    /* TODO: actually meansure min entropy per sample */
-    return 1.3;
-}
 
-extern uint8_t efi_sample ( void );
-static inline __always_inline int
-ENTROPY_INLINE ( efi, get_noise ) ( noise_sample_t *noise ) {
-
-    /* get sample */
-    *noise = efi_sample();
-
-    /* success */
-    return 0;
+	/* We use essentially the same mechanism as for the BIOS
+	 * RTC-based entropy source, and so assume the same
+	 * min-entropy per sample.
+	 */
+	return MIN_ENTROPY ( 1.3 );
 }
 
 #endif /* _IPXE_EFI_ENTROPY_H */

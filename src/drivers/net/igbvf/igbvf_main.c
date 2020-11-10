@@ -461,7 +461,7 @@ static int __devinit igbvf_sw_init ( struct igbvf_adapter *adapter )
         hw->vendor_id = pdev->vendor;
         hw->device_id = pdev->device;
 
-        pci_read_config_byte ( pdev, PCI_REVISION_ID, &hw->revision_id );
+        pci_read_config_byte ( pdev, PCI_REVISION, &hw->revision_id );
 
         pci_read_config_word ( pdev, PCI_COMMAND, &hw->bus.pci_cmd_word );
 
@@ -843,7 +843,7 @@ int igbvf_probe ( struct pci_device *pdev )
 	DBG ( "mmio_start: %#08lx\n", mmio_start );
 	DBG ( "mmio_len: %#08lx\n", mmio_len );
 
-	adapter->hw.hw_addr = ioremap ( mmio_start, mmio_len );
+	adapter->hw.hw_addr = pci_ioremap ( pdev, mmio_start, mmio_len );
 	DBG ( "adapter->hw.hw_addr: %p\n", adapter->hw.hw_addr );
 
 	if ( ! adapter->hw.hw_addr ) {

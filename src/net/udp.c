@@ -17,7 +17,7 @@
  * UDP protocol
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 /**
  * A UDP connection
@@ -328,6 +328,7 @@ static int udp_rx ( struct io_buffer *iobuf,
 struct tcpip_protocol udp_protocol __tcpip_protocol = {
 	.name = "UDP",
 	.rx = udp_rx,
+	.zero_csum = TCPIP_NEGATIVE_ZERO_CSUM,
 	.tcpip_proto = IP_UDP,
 };
 
@@ -395,17 +396,9 @@ static struct interface_descriptor udp_xfer_desc =
  ***************************************************************************
  */
 
-/** UDP IPv4 socket opener */
-struct socket_opener udp_ipv4_socket_opener __socket_opener = {
+/** UDP socket opener */
+struct socket_opener udp_socket_opener __socket_opener = {
 	.semantics	= UDP_SOCK_DGRAM,
-	.family		= AF_INET,
-	.open		= udp_open,
-};
-
-/** UDP IPv6 socket opener */
-struct socket_opener udp_ipv6_socket_opener __socket_opener = {
-	.semantics	= UDP_SOCK_DGRAM,
-	.family		= AF_INET6,
 	.open		= udp_open,
 };
 

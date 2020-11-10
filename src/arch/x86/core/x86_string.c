@@ -15,6 +15,10 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
 /** @file
@@ -23,9 +27,17 @@
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <string.h>
+#include <config/defaults.h>
+
+/* Use generic_memcpy_reverse() if we cannot safely set the direction flag */
+#ifdef UNSAFE_STD
+#define USE_GENERIC_MEMCPY_REVERSE 1
+#else
+#define USE_GENERIC_MEMCPY_REVERSE 0
+#endif
 
 /**
  * Copy memory area
@@ -73,6 +85,12 @@ void * __attribute__ (( noinline )) __memcpy_reverse ( void *dest,
 	const void *esi = ( src + len - 1 );
 	int discard_ecx;
 
+	/* Use unoptimised version if we are not permitted to modify
+	 * the direction flag.
+	 */
+	if ( USE_GENERIC_MEMCPY_REVERSE )
+		return generic_memcpy_reverse ( dest, src, len );
+
 	/* Assume memmove() is not performance-critical, and perform a
 	 * bytewise copy for simplicity.
 	 */
@@ -103,88 +121,4 @@ void * __memmove ( void *dest, const void *src, size_t len ) {
 	} else {
 		return __memcpy_reverse ( dest, src, len );
 	}
-}
-
-/**
- * Swap memory areas
- *
- * @v dest		Destination address
- * @v src		Source address
- * @v len		Length
- * @ret dest		Destination address
- */
-void * memswap ( void *dest, void *src, size_t len ) {
-	size_t discard_c;
-	int discard;
-
-	__asm__ __volatile__ ( "\n1:\n\t"
-			       "dec %2\n\t"
-			       "js 2f\n\t"
-			       "movb (%0,%2), %b3\n\t"
-			       "xchgb (%1,%2), %b3\n\t"
-			       "movb %b3, (%0,%2)\n\t"
-			       "jmp 1b\n\t"
-			       "2:\n\t"
-			       : "=r" ( src ), "=r" ( dest ),
-				 "=&c" ( discard_c ), "=&q" ( discard )
-			       : "0" ( src ), "1" ( dest ), "2" ( len )
-			       : "memory" );
-
-	return dest;
-}
-
-/**
- * Calculate length of string
- *
- * @v string		String
- * @ret len		Length (excluding NUL)
- */
-size_t strlen ( const char *string ) {
-	const char *discard_D;
-	size_t len_plus_one;
-
-	__asm__ __volatile__ ( "repne scasb\n\t"
-			       "not %1\n\t"
-			       : "=&D" ( discard_D ), "=&c" ( len_plus_one )
-			       : "0" ( string ), "1" ( -1UL ), "a" ( 0 ) );
-
-	return ( len_plus_one - 1 );
-}
-
-/**
- * Compare strings (up to a specified length)
- *
- * @v str1		First string
- * @v str2		Second string
- * @v len		Maximum length
- * @ret diff		Difference
- */
-int strncmp ( const char *str1, const char *str2, size_t len ) {
-	const void *discard_S;
-	const void *discard_D;
-	size_t discard_c;
-	int diff;
-
-	__asm__ __volatile__ ( "\n1:\n\t"
-			       "dec %2\n\t"
-			       "js 2f\n\t"
-			       "lodsb\n\t"
-			       "scasb\n\t"
-			       "jne 3f\n\t"
-			       "testb %b3, %b3\n\t"
-			       "jnz 1b\n\t"
-			       /* Equal */
-			       "\n2:\n\t"
-			       "xor %3, %3\n\t"
-			       "jmp 4f\n\t"
-			       /* Not equal; CF indicates difference */
-			       "\n3:\n\t"
-			       "sbb %3, %3\n\t"
-			       "orb $1, %b3\n\t"
-			       "\n4:\n\t"
-			       : "=&S" ( discard_S ), "=&D" ( discard_D ),
-				 "=&c" ( discard_c ), "=&a" ( diff )
-			       : "0" ( str1 ), "1" ( str2 ), "2" ( len ) );
-
-	return diff;
 }

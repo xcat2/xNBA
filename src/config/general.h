@@ -7,25 +7,9 @@
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <config/defaults.h>
-
-/*
- * Branding
- *
- * Vendors may use these strings to add their own branding to iPXE.
- * PRODUCT_NAME is displayed prior to any iPXE branding in startup
- * messages, and PRODUCT_SHORT_NAME is used where a brief product
- * label is required (e.g. in BIOS boot selection menus).
- *
- * To minimise end-user confusion, it's probably a good idea to either
- * make PRODUCT_SHORT_NAME a substring of PRODUCT_NAME or leave it as
- * "iPXE".
- *
- */
-#define PRODUCT_NAME "xCAT Network Boot Agent"
-#define PRODUCT_SHORT_NAME "xNBA"
 
 /*
  * Banner timeout configuration
@@ -42,7 +26,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
  * initialisation vector, thus rendering the banner almost invisible
  * to the user.
  */
-#define BANNER_TIMEOUT		0
+#define BANNER_TIMEOUT		20
 #define ROM_BANNER_TIMEOUT	( 2 * BANNER_TIMEOUT )
 
 /*
@@ -51,15 +35,17 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 #define	NET_PROTO_IPV4		/* IPv4 protocol */
-#undef	NET_PROTO_IPV6		/* IPv6 protocol */
+//#define NET_PROTO_IPV6	/* IPv6 protocol */
 #undef	NET_PROTO_FCOE		/* Fibre Channel over Ethernet protocol */
+#define	NET_PROTO_STP		/* Spanning Tree protocol */
+#define	NET_PROTO_LACP		/* Link Aggregation control protocol */
 
 /*
  * PXE support
  *
  */
 //#undef	PXE_STACK		/* PXE stack in iPXE - you want this! */
-#undef	PXE_MENU		/* PXE menu booting */
+//#undef	PXE_MENU		/* PXE menu booting */
 
 /*
  * Download protocols
@@ -68,28 +54,40 @@ FILE_LICENCE ( GPL2_OR_LATER );
 
 #define	DOWNLOAD_PROTO_TFTP	/* Trivial File Transfer Protocol */
 #define	DOWNLOAD_PROTO_HTTP	/* Hypertext Transfer Protocol */
-#define DOWNLOAD_PROTO_HTTPS	/* Secure Hypertext Transfer Protocol */
+#undef	DOWNLOAD_PROTO_HTTPS	/* Secure Hypertext Transfer Protocol */
 #undef	DOWNLOAD_PROTO_FTP	/* File Transfer Protocol */
 #undef	DOWNLOAD_PROTO_SLAM	/* Scalable Local Area Multicast */
 #undef	DOWNLOAD_PROTO_NFS	/* Network File System Protocol */
+//#undef DOWNLOAD_PROTO_FILE	/* Local filesystem access */
 
 /*
  * SAN boot protocols
  *
  */
 
-#define	SANBOOT_PROTO_ISCSI	/* iSCSI protocol */
-#undef	SANBOOT_PROTO_AOE	/* AoE protocol */
-#undef	SANBOOT_PROTO_IB_SRP	/* Infiniband SCSI RDMA protocol */
-#undef	SANBOOT_PROTO_FCP	/* Fibre Channel protocol */
+//#undef	SANBOOT_PROTO_ISCSI	/* iSCSI protocol */
+//#undef	SANBOOT_PROTO_AOE	/* AoE protocol */
+//#undef	SANBOOT_PROTO_IB_SRP	/* Infiniband SCSI RDMA protocol */
+//#undef	SANBOOT_PROTO_FCP	/* Fibre Channel protocol */
+//#undef	SANBOOT_PROTO_HTTP	/* HTTP SAN protocol */
+
+/*
+ * HTTP extensions
+ *
+ */
+#define HTTP_AUTH_BASIC		/* Basic authentication */
+#define HTTP_AUTH_DIGEST	/* Digest authentication */
+//#define HTTP_AUTH_NTLM	/* NTLM authentication */
+//#define HTTP_ENC_PEERDIST	/* PeerDist content encoding */
+//#define HTTP_HACK_GCE		/* Google Compute Engine hacks */
 
 /*
  * 802.11 cryptosystems and handshaking protocols
  *
  */
-#undef	CRYPTO_80211_WEP	/* WEP encryption (deprecated and insecure!) */
-#undef	CRYPTO_80211_WPA	/* WPA Personal, authenticating with passphrase */
-#undef	CRYPTO_80211_WPA2	/* Add support for stronger WPA cryptography */
+#define	CRYPTO_80211_WEP	/* WEP encryption (deprecated and insecure!) */
+#define	CRYPTO_80211_WPA	/* WPA Personal, authenticating with passphrase */
+#define	CRYPTO_80211_WPA2	/* Add support for stronger WPA cryptography */
 
 /*
  * Name resolution modules
@@ -105,43 +103,40 @@ FILE_LICENCE ( GPL2_OR_LATER );
  * you want to use.
  *
  */
-#undef	IMAGE_NBI		/* NBI image support */
+//#define	IMAGE_NBI		/* NBI image support */
 //#define	IMAGE_ELF		/* ELF image support */
-#undef	IMAGE_MULTIBOOT		/* MultiBoot image support */
+//#define	IMAGE_MULTIBOOT		/* MultiBoot image support */
 //#define	IMAGE_PXE		/* PXE image support */
 //#define	IMAGE_SCRIPT		/* iPXE script image support */
 //#define	IMAGE_BZIMAGE		/* Linux bzImage image support */
-#undef	IMAGE_COMBOOT		/* SYSLINUX COMBOOT image support */
+//#define	IMAGE_COMBOOT		/* SYSLINUX COMBOOT image support */
 //#define	IMAGE_EFI		/* EFI image support */
 //#define	IMAGE_SDI		/* SDI image support */
 //#define	IMAGE_PNM		/* PNM image support */
-//#define	IMAGE_PNG		/* PNG image support */
+#define	IMAGE_PNG		/* PNG image support */
+#define	IMAGE_DER		/* DER image support */
+#define	IMAGE_PEM		/* PEM image support */
 
 /*
  * Command-line commands to include
  *
  */
-#undef	AUTOBOOT_CMD		/* Automatic booting */
+#define	AUTOBOOT_CMD		/* Automatic booting */
 #define	NVO_CMD			/* Non-volatile option storage commands */
-#undef	CONFIG_CMD		/* Option configuration console */
-#undef	IFMGMT_CMD		/* Interface management commands */
-#undef	IWMGMT_CMD		/* Wireless interface management commands */
-#undef FCMGMT_CMD		/* Fibre Channel management commands */
-#undef	ROUTE_CMD		/* Routing table management commands */
+#define	CONFIG_CMD		/* Option configuration console */
+#define	IFMGMT_CMD		/* Interface management commands */
+#define	IWMGMT_CMD		/* Wireless interface management commands */
+#define IBMGMT_CMD		/* Infiniband management commands */
+#define FCMGMT_CMD		/* Fibre Channel management commands */
+#define	ROUTE_CMD		/* Routing table management commands */
 #define IMAGE_CMD		/* Image management commands */
 #define DHCP_CMD		/* DHCP management commands */
 #define SANBOOT_CMD		/* SAN boot commands */
-#undef MENU_CMD		/* Menu commands */
-#undef LOGIN_CMD		/* Login command */
-#undef	TIME_CMD		/* Time commands */
-#undef	DIGEST_CMD		/* Image crypto digest commands */
-#undef	LOTEST_CMD		/* Loopback testing commands */
-#undef	VLAN_CMD		/* VLAN commands */
-#undef	PXE_CMD			/* PXE commands */
-#undef	REBOOT_CMD		/* Reboot command */
-#define IMAGE_TRUST_CMD	/* Image trust management commands */
-#undef  SYNC_CMD		/* Sync command */
-#undef  NSLOOKUP_CMD		/* DNS resolving command */
+#define MENU_CMD		/* Menu commands */
+#define LOGIN_CMD		/* Login command */
+#define SYNC_CMD		/* Sync command */
+#define SHELL_CMD		/* Shell command */
+//#define NSLOOKUP_CMD		/* DNS resolving command */
 //#define TIME_CMD		/* Time commands */
 //#define DIGEST_CMD		/* Image crypto digest commands */
 //#define LOTEST_CMD		/* Loopback testing commands */
@@ -157,12 +152,22 @@ FILE_LICENCE ( GPL2_OR_LATER );
 //#define CONSOLE_CMD		/* Console command */
 //#define IPSTAT_CMD		/* IP statistics commands */
 //#define PROFSTAT_CMD		/* Profiling commands */
+//#define NTP_CMD		/* NTP commands */
+//#define CERT_CMD		/* Certificate management commands */
 
 /*
  * ROM-specific options
  *
  */
 #undef	NONPNP_HOOK_INT19	/* Hook INT19 on non-PnP BIOSes */
+#define	AUTOBOOT_ROM_FILTER	/* Autoboot only devices matching our ROM */
+
+/*
+ * Virtual network devices
+ *
+ */
+#define VNIC_IPOIB		/* Infiniband IPoIB virtual NICs */
+//#define VNIC_XSIGO		/* Infiniband Xsigo virtual NICs */
 
 /*
  * Error message tables to include
@@ -177,7 +182,6 @@ FILE_LICENCE ( GPL2_OR_LATER );
  *
  */
 
-#define	NETDEV_DISCARD_RATE 0	/* Drop every N packets (0=>no drop) */
 #undef	BUILD_SERIAL		/* Include an automatic build serial
 				 * number.  Add "bs" to the list of
 				 * make targets.  For example:
@@ -188,7 +192,14 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #undef	GDBSERIAL		/* Remote GDB debugging over serial */
 #undef	GDBUDP			/* Remote GDB debugging over UDP
 				 * (both may be set) */
+//#define EFI_DOWNGRADE_UX	/* Downgrade UEFI user experience */
+#define	TIVOLI_VMM_WORKAROUND	/* Work around the Tivoli VMM's garbling of SSE
+				 * registers when iPXE traps to it due to
+				 * privileged instructions */
 
+#include <config/named.h>
+#include NAMED_CONFIG(general.h)
 #include <config/local/general.h>
+#include LOCAL_NAMED_CONFIG(general.h)
 
 #endif /* CONFIG_GENERAL_H */
